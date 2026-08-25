@@ -44,10 +44,25 @@ export class ProdutosService {
 
     if (filtro.busca?.trim()) {
       const termo = escapar(filtro.busca.trim());
-      // o mesmo campo serve para digitar o nome e para bipar o código
+
+      /**
+       * O mesmo campo serve para digitar o nome e para bipar o código.
+       *
+       * A busca inclui o código das VARIAÇÕES: quando cada cor/tamanho
+       * tem etiqueta própria, é esse o código que vem na peça. Sem
+       * isso, bipar a etiqueta da 44 preta não achava nada — mesmo com
+       * o produto cadastrado.
+       *
+       * Nome é busca parcial; código é exato, para "123" não trazer
+       * todo produto cujo código contenha 123.
+       */
       query.$or = [
         { nome: new RegExp(termo, 'i') },
         { codigoBarras: new RegExp(`^${termo}$`, 'i') },
+        { 'variacoes.codigoBarras': new RegExp(`^${termo}$`, 'i') },
+        // cor e tamanho: procurar "azul" traz o que tem variação azul
+        { 'variacoes.cor': new RegExp(termo, 'i') },
+        { 'variacoes.tamanho': new RegExp(`^${termo}$`, 'i') },
       ];
     }
 
