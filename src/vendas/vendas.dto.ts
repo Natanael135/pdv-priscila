@@ -20,6 +20,11 @@ export class ItemVendaDto {
   @IsMongoId({ message: 'Produto inválido' })
   produto: string;
 
+  /** obrigatório quando o produto tem grade de cor/tamanho */
+  @IsOptional()
+  @IsMongoId({ message: 'Variação inválida' })
+  variacao?: string;
+
   @IsNumber({}, { message: 'Informe a quantidade' })
   @IsPositive({ message: 'A quantidade precisa ser maior que zero' })
   quantidade: number;

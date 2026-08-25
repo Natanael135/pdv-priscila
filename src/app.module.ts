@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
-import { CaixaModule } from './caixa/caixa.module';
 import { CategoriasModule } from './categorias/categorias.module';
 import { ClientesModule } from './clientes/clientes.module';
 import { ConfiguracoesModule } from './configuracoes/configuracoes.module';
@@ -46,7 +45,6 @@ import { VendasModule } from './vendas/vendas.module';
     VendasModule,
     ParcelasModule,
     EstoqueModule,
-    CaixaModule,
     DashboardModule,
     NotificacoesModule,
     ConfiguracoesModule,

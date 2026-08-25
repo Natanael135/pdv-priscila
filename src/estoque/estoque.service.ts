@@ -1,8 +1,17 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model, Types } from 'mongoose';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
-import { Produto, ProdutoDocument } from '../produtos/produto.schema';
+import {
+  Produto,
+  ProdutoDocument,
+  somarVariacoes,
+  Variacao,
+} from '../produtos/produto.schema';
 import {
   Movimentacao,
   MovimentacaoDocument,
@@ -11,6 +20,8 @@ import {
 
 export interface EntradaMovimentacao {
   produtoId: string | Types.ObjectId;
+  /** obrigatório quando o produto tem grade de cor/tamanho */
+  variacaoId?: string | null;
   tipo: TipoMovimentacao;
   /** 'ajuste' -> contagem nova; demais -> quanto entrou/saiu */
   quantidade: number;
@@ -53,8 +64,29 @@ export class EstoqueService {
     // serviço / produto sem controle: nada a movimentar
     if (!produto.controlaEstoque) return produto;
 
-    const anterior = produto.estoqueAtual;
+    const temGrade = (produto.variacoes?.length ?? 0) > 0;
+
+    if (temGrade && !entrada.variacaoId) {
+      throw new BadRequestException(
+        `"${produto.nome}" tem grade de cor/tamanho. Diga qual variação movimentar.`,
+      );
+    }
+
     const quantidade = Math.abs(Number(entrada.quantidade));
+
+    // Onde o saldo vive: na variação, quando há grade; no produto,
+    // quando não há. O resto do cálculo é idêntico nos dois casos.
+    const variacao = temGrade
+      ? produto.variacoes.find(
+          (v) => String((v as unknown as { _id: Types.ObjectId })._id) === entrada.variacaoId,
+        )
+      : null;
+
+    if (temGrade && !variacao) {
+      throw new NotFoundException('Variação não encontrada neste produto');
+    }
+
+    const anterior = variacao ? variacao.estoqueAtual : produto.estoqueAtual;
 
     const delta =
       entrada.tipo === 'ajuste'
@@ -63,23 +95,27 @@ export class EstoqueService {
           ? quantidade
           : -quantidade;
 
-    const atualizado = await this.produtos
-      .findByIdAndUpdate(
-        produto._id,
-        { $inc: { estoqueAtual: delta } },
-        { returnDocument: 'after', session },
-      )
-      .exec();
+    if (variacao) {
+      variacao.estoqueAtual = anterior + delta;
+      // o saldo do produto é a soma da grade — ver produto.schema.ts
+      produto.estoqueAtual = somarVariacoes(produto.variacoes);
+    } else {
+      produto.estoqueAtual = anterior + delta;
+    }
+
+    await produto.save({ session });
 
     await this.movimentacoes.create(
       [
         {
           produto: produto._id,
           produtoNome: produto.nome,
+          variacao: entrada.variacaoId ?? null,
+          variacaoDescricao: variacao ? descreverVariacao(variacao) : null,
           tipo: entrada.tipo,
           quantidade: entrada.tipo === 'ajuste' ? Math.abs(delta) : quantidade,
           estoqueAnterior: anterior,
-          estoqueNovo: atualizado!.estoqueAtual,
+          estoqueNovo: variacao ? variacao.estoqueAtual : produto.estoqueAtual,
           custoUnitario: entrada.custoUnitario ?? produto.precoCompra,
           venda: entrada.vendaId ?? null,
           motivo: entrada.motivo ?? null,
@@ -88,9 +124,9 @@ export class EstoqueService {
       { session, ordered: true },
     );
 
-    await this.notificacoes.avaliarEstoque(atualizado!, session);
+    await this.notificacoes.avaliarEstoque(produto, session);
 
-    return atualizado!;
+    return produto;
   }
 
   /**
@@ -168,4 +204,9 @@ export class EstoqueService {
 
 function arredondar(n: number) {
   return Math.round(n * 100) / 100;
+}
+
+/** "44 · Preto" — mesmo rótulo do virtual da variação. */
+function descreverVariacao(v: Variacao): string {
+  return [v.tamanho, v.cor].filter(Boolean).join(' · ') || 'Padrão';
 }

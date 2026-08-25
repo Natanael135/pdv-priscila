@@ -30,6 +30,13 @@ export class Movimentacao {
   @Prop({ type: String, default: null })
   produtoNome: string | null;
 
+  /** id da variação movimentada, quando o produto tem grade */
+  @Prop({ type: String, default: null })
+  variacao: string | null;
+
+  @Prop({ type: String, default: null })
+  variacaoDescricao: string | null;
+
   @Prop({ type: String, required: true, enum: TIPOS_MOVIMENTACAO })
   tipo: TipoMovimentacao;
 

@@ -19,9 +19,28 @@ export class Configuracao {
   @Prop({ type: String, default: null })
   endereco: string | null;
 
+  /** logo da loja, usada no comprovante e no topo dos ajustes */
+  @Prop({ type: String, default: null })
+  logoUrl: string | null;
+
+  /** id no Cloudinary — necessário para apagar a logo antiga ao trocar */
+  @Prop({ type: String, default: null })
+  logoPublicId: string | null;
+
   /** desliga os avisos de estoque sem precisar mexer produto por produto */
   @Prop({ default: true })
   alertaEstoque: boolean;
+
+  /**
+   * Deixa vender mais do que existe em estoque.
+   *
+   * Desligado por padrão: estoque negativo quase sempre é erro de
+   * digitação, e o saldo errado contamina o valor do estoque e a lista
+   * de compras. Quem trabalha com encomenda ou pronta-entrega
+   * imprecisa pode ligar e assumir o negativo conscientemente.
+   */
+  @Prop({ default: false })
+  permitirVendaSemEstoque: boolean;
 
   /** prazo padrão do fiado, em dias, quando a venda não informa outro */
   @Prop({ default: 30 })

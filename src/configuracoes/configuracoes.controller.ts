@@ -32,8 +32,22 @@ class AtualizarConfiguracaoDto {
   endereco?: string | null;
 
   @IsOptional()
+  @vazioVirarNulo()
+  @IsString()
+  logoUrl?: string | null;
+
+  @IsOptional()
+  @vazioVirarNulo()
+  @IsString()
+  logoPublicId?: string | null;
+
+  @IsOptional()
   @IsBoolean()
   alertaEstoque?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  permitirVendaSemEstoque?: boolean;
 
   @IsOptional()
   @IsInt()

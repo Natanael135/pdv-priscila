@@ -6,7 +6,6 @@ import {
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import dayjs from 'dayjs';
 import { ClientSession, Connection, Model, QueryFilter, Types } from 'mongoose';
-import { Caixa } from '../caixa/caixa.schema';
 import { Cliente, ClienteDocument } from '../clientes/cliente.schema';
 import { ContadorService } from '../common/contador.service';
 import { fimDoDia, inicioDoDia } from '../common/fuso';
@@ -14,7 +13,7 @@ import { dinheiro } from '../common/margem';
 import { Configuracao } from '../configuracoes/configuracao.schema';
 import { EstoqueService } from '../estoque/estoque.service';
 import { Parcela } from '../parcelas/parcela.schema';
-import { Produto } from '../produtos/produto.schema';
+import { Produto, Variacao } from '../produtos/produto.schema';
 import { Venda, VendaDocument, VendaItem } from './venda.schema';
 import { RegistrarVendaDto } from './vendas.dto';
 
@@ -36,7 +35,6 @@ export class VendasService {
     @InjectModel(Produto.name) private readonly produtos: Model<Produto>,
     @InjectModel(Cliente.name) private readonly clientes: Model<ClienteDocument>,
     @InjectModel(Parcela.name) private readonly parcelas: Model<Parcela>,
-    @InjectModel(Caixa.name) private readonly caixas: Model<Caixa>,
     @InjectModel(Configuracao.name)
     private readonly configuracoes: Model<Configuracao>,
     private readonly estoque: EstoqueService,
@@ -84,9 +82,13 @@ export class VendasService {
 
     const porId = new Map(produtos.map((p) => [String(p._id), p]));
 
+    const config = await this.configuracoes.findOne().session(session).exec();
+    const permiteNegativo = config?.permitirVendaSemEstoque ?? false;
+
     const itens: VendaItem[] = [];
     let subtotal = 0;
     let custoTotal = 0;
+    const semEstoque: string[] = [];
 
     for (const entrada of dto.itens) {
       const produto = porId.get(entrada.produto);
@@ -94,7 +96,52 @@ export class VendasService {
         throw new NotFoundException(`Produto ${entrada.produto} não encontrado`);
       }
 
-      const precoUnitario = entrada.precoUnitario ?? produto.precoVenda;
+      // ── Variação (cor/tamanho) ──────────────────────────────────
+      const temGrade = (produto.variacoes?.length ?? 0) > 0;
+      let variacao: Variacao | null = null;
+
+      if (temGrade) {
+        if (!entrada.variacao) {
+          throw new BadRequestException(
+            `Escolha a cor/tamanho de "${produto.nome}" antes de vender.`,
+          );
+        }
+
+        variacao =
+          produto.variacoes.find(
+            (v) =>
+              String((v as unknown as { _id: Types.ObjectId })._id) ===
+              entrada.variacao,
+          ) ?? null;
+
+        if (!variacao) {
+          throw new NotFoundException(
+            `Variação não encontrada em "${produto.nome}"`,
+          );
+        }
+      }
+
+      // O saldo conferido é o da VARIAÇÃO quando existe grade. Olhar o
+      // total do produto deixaria vender a calça 36 azul (zero) só
+      // porque há 15 da 44 preta — o caso que motivou a grade.
+      const saldo = variacao ? variacao.estoqueAtual : produto.estoqueAtual;
+      const nomeCompleto = variacao
+        ? `${produto.nome} (${descreverVariacao(variacao)})`
+        : produto.nome;
+
+      // Confere o estoque ANTES de gravar qualquer coisa. Juntamos todos
+      // os itens que faltam numa lista só: avisar de um em um faria a
+      // pessoa tentar salvar cinco vezes para descobrir cinco problemas.
+      if (!permiteNegativo && produto.controlaEstoque && entrada.quantidade > saldo) {
+        semEstoque.push(
+          `${nomeCompleto} (tem ${formatarQtd(saldo)} ` +
+            `${produto.unidade}, pediu ${formatarQtd(entrada.quantidade)})`,
+        );
+      }
+
+      // preço da variação tem prioridade; sem ele, o do produto
+      const precoUnitario =
+        entrada.precoUnitario ?? variacao?.precoVenda ?? produto.precoVenda;
       const desconto = entrada.desconto ?? 0;
       const total = dinheiro(entrada.quantidade * precoUnitario - desconto);
 
@@ -108,6 +155,8 @@ export class VendasService {
         produto: produto._id as Types.ObjectId,
         // fotografia do momento: preço e custo de hoje ficam congelados
         produtoNome: produto.nome,
+        variacao: entrada.variacao ?? null,
+        variacaoDescricao: variacao ? descreverVariacao(variacao) : null,
         quantidade: entrada.quantidade,
         precoUnitario,
         custoUnitario: produto.precoCompra,
@@ -117,6 +166,14 @@ export class VendasService {
 
       subtotal = dinheiro(subtotal + total);
       custoTotal = dinheiro(custoTotal + entrada.quantidade * produto.precoCompra);
+    }
+
+    if (semEstoque.length) {
+      throw new BadRequestException(
+        `Sem estoque suficiente: ${semEstoque.join('; ')}. ` +
+          'Dê entrada no estoque ou ajuste a quantidade. ' +
+          '(Para permitir venda sem estoque, mude em Ajustes.)',
+      );
     }
 
     // ── Totais ─────────────────────────────────────────────────────
@@ -160,7 +217,7 @@ export class VendasService {
     const situacao =
       totalFiado === 0 ? 'pago' : totalFiado >= total ? 'fiado' : 'parcial';
 
-    // ── Cliente e caixa ────────────────────────────────────────────
+    // ── Cliente ────────────────────────────────────────────────────
     const cliente = dto.cliente
       ? await this.clientes.findById(dto.cliente).session(session).exec()
       : null;
@@ -168,11 +225,6 @@ export class VendasService {
     if (dto.cliente && !cliente) {
       throw new NotFoundException('Cliente não encontrado');
     }
-
-    const caixaAberto = await this.caixas
-      .findOne({ status: 'aberto' })
-      .session(session)
-      .exec();
 
     // ── Grava ──────────────────────────────────────────────────────
     const numero = await this.contador.proximo('venda', session);
@@ -183,7 +235,6 @@ export class VendasService {
           numero,
           cliente: cliente?._id ?? null,
           clienteNome: cliente?.nome ?? null,
-          caixa: caixaAberto?._id ?? null,
           data: new Date(),
           itens,
           pagamentos: dto.pagamentos.map((p) => ({
@@ -209,6 +260,7 @@ export class VendasService {
       await this.estoque.movimentar(
         {
           produtoId: item.produto,
+          variacaoId: item.variacao,
           tipo: 'venda',
           quantidade: item.quantidade,
           custoUnitario: item.custoUnitario,
@@ -339,6 +391,7 @@ export class VendasService {
           await this.estoque.movimentar(
             {
               produtoId: item.produto,
+              variacaoId: item.variacao,
               tipo: 'cancelamento',
               quantidade: item.quantidade,
               custoUnitario: item.custoUnitario,
@@ -394,4 +447,16 @@ function moeda(n: number) {
 
 function escapar(texto: string) {
   return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/** Quantidade sem zeros à toa: 3 vira "3", 0.5 vira "0,5". */
+function formatarQtd(n: number): string {
+  return Number.isInteger(n)
+    ? String(n)
+    : String(Number(n.toFixed(3))).replace('.', ',');
+}
+
+/** "44 · Preto" — mesmo rótulo usado no estoque e na tela. */
+function descreverVariacao(v: Variacao): string {
+  return [v.tamanho, v.cor].filter(Boolean).join(' · ') || 'Padrão';
 }

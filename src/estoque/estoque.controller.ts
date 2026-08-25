@@ -36,6 +36,7 @@ export class EstoqueController {
   ) {
     return this.service.movimentar({
       produtoId,
+      variacaoId: dto.variacao ?? null,
       tipo: dto.tipo,
       quantidade: dto.quantidade,
       custoUnitario: dto.custoUnitario ?? null,

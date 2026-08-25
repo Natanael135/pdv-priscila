@@ -20,4 +20,9 @@ export class MovimentarEstoqueDto {
   @IsOptional()
   @IsString()
   motivo?: string;
+
+  /** id da variação, quando o produto tem grade */
+  @IsOptional()
+  @IsString()
+  variacao?: string;
 }

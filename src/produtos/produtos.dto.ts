@@ -1,5 +1,6 @@
-import { Transform } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsArray,
   IsBoolean,
   IsMongoId,
   IsNumber,
@@ -8,9 +9,55 @@ import {
   MaxLength,
   Min,
   MinLength,
+  ValidateNested,
 } from 'class-validator';
 
 /** Campo de texto que vem vazio do formulário vira null, não "". */
+export class VariacaoDto {
+  /** presente ao editar; ausente cria uma variação nova */
+  @IsOptional()
+  @IsString()
+  id?: string;
+
+  @IsOptional()
+  @IsString()
+  cor?: string | null;
+
+  @IsOptional()
+  @IsString()
+  tamanho?: string | null;
+
+  @IsOptional()
+  @IsString()
+  codigoBarras?: string | null;
+
+  @IsOptional()
+  @IsNumber()
+  estoqueAtual?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  estoqueMinimo?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  precoVenda?: number | null;
+
+  @IsOptional()
+  @IsBoolean()
+  ativo?: boolean;
+}
+
+export class FotoDto {
+  @IsString()
+  url: string;
+
+  @IsString()
+  publicId: string;
+}
+
 const vazioVirarNulo = () =>
   Transform(({ value }: { value: unknown }) =>
     typeof value === 'string' && value.trim() === '' ? null : value,
@@ -38,14 +85,16 @@ export class CriarProdutoDto {
   codigoBarras?: string | null;
 
   @IsOptional()
-  @vazioVirarNulo()
-  @IsString()
-  fotoUrl?: string | null;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FotoDto)
+  fotos?: FotoDto[];
 
   @IsOptional()
-  @vazioVirarNulo()
-  @IsString()
-  fotoPublicId?: string | null;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => VariacaoDto)
+  variacoes?: VariacaoDto[];
 
   @IsNumber({}, { message: 'Informe o preço de compra' })
   @Min(0, { message: 'O preço de compra não pode ser negativo' })
@@ -97,14 +146,16 @@ export class AtualizarProdutoDto {
   codigoBarras?: string | null;
 
   @IsOptional()
-  @vazioVirarNulo()
-  @IsString()
-  fotoUrl?: string | null;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => FotoDto)
+  fotos?: FotoDto[];
 
   @IsOptional()
-  @vazioVirarNulo()
-  @IsString()
-  fotoPublicId?: string | null;
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => VariacaoDto)
+  variacoes?: VariacaoDto[];
 
   @IsOptional()
   @IsNumber()

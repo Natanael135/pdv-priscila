@@ -5,6 +5,65 @@ import { opcoesSchema } from '../common/schema-options';
 
 export type ProdutoDocument = HydratedDocument<Produto>;
 
+/** Uma imagem da galeria. O publicId é o que permite apagá-la depois. */
+@Schema({ _id: false })
+export class Foto {
+  @Prop({ required: true })
+  url: string;
+
+  @Prop({ required: true })
+  publicId: string;
+}
+
+export const FotoSchema = SchemaFactory.createForClass(Foto);
+
+/**
+ * Variação do produto: cor, tamanho, ou os dois.
+ *
+ * É opcional por produto. Um jogo de lençol tem sentido em "casal /
+ * branco"; uma toalha avulsa pode não ter variação nenhuma.
+ *
+ * O estoque mora AQUI quando existem variações, e não no produto. Sem
+ * isso não dá para responder a pergunta que a loja faz o dia todo:
+ * "tem na 44 preta?" — o saldo do produto somado esconde justamente a
+ * informação que importa.
+ */
+@Schema({ _id: true })
+export class Variacao {
+  @Prop({ type: String, default: null })
+  cor: string | null;
+
+  @Prop({ type: String, default: null })
+  tamanho: string | null;
+
+  /** código próprio da variação, quando cada uma tem etiqueta */
+  @Prop({ type: String, default: null })
+  codigoBarras: string | null;
+
+  @Prop({ default: 0 })
+  estoqueAtual: number;
+
+  @Prop({ default: 0, min: 0 })
+  estoqueMinimo: number;
+
+  /** preço próprio; null = usa o preço do produto */
+  @Prop({ type: Number, default: null })
+  precoVenda: number | null;
+
+  @Prop({ default: true })
+  ativo: boolean;
+}
+
+export const VariacaoSchema = SchemaFactory.createForClass(Variacao);
+
+/** "44 · Preto" — o rótulo que aparece na tela e no cupom. */
+VariacaoSchema.virtual('descricao').get(function (this: Variacao) {
+  return [this.tamanho, this.cor].filter(Boolean).join(' · ') || 'Padrão';
+});
+
+VariacaoSchema.set('toJSON', { virtuals: true });
+VariacaoSchema.set('toObject', { virtuals: true });
+
 @Schema(opcoesSchema)
 export class Produto {
   @Prop({ required: true, trim: true })
@@ -20,12 +79,17 @@ export class Produto {
   @Prop({ type: String, default: null })
   codigoBarras: string | null;
 
-  @Prop({ type: String, default: null })
-  fotoUrl: string | null;
-
-  /** id da imagem no Cloudinary — sem ele não dá para apagar a foto antiga */
-  @Prop({ type: String, default: null })
-  fotoPublicId: string | null;
+  /**
+   * Galeria do produto. A PRIMEIRA é a capa — a que aparece no card,
+   * no carrinho e no comprovante.
+   *
+   * Vira lista porque em cama, mesa e banho uma foto não conta a
+   * história: o cliente quer ver a estampa, a cor real e o produto na
+   * cama montada. `fotoUrl` continua existindo como virtual apontando
+   * para a capa, então tudo que já lia esse campo segue funcionando.
+   */
+  @Prop({ type: [FotoSchema], default: [] })
+  fotos: Foto[];
 
   @Prop({ required: true, default: 0, min: 0 })
   precoCompra: number;
@@ -39,6 +103,21 @@ export class Produto {
   @Prop({ default: true })
   controlaEstoque: boolean;
 
+  /**
+   * Grades de cor/tamanho. Vazio = produto simples, estoque no próprio
+   * produto (o comportamento de sempre).
+   */
+  @Prop({ type: [VariacaoSchema], default: [] })
+  variacoes: Variacao[];
+
+  /**
+   * Saldo do produto.
+   *
+   * Sem variações, é movimentado direto. COM variações, passa a ser a
+   * soma das variações, recalculada a cada movimento — assim as telas
+   * de "estoque baixo", "valor em estoque" e a situação do card
+   * continuam funcionando sem saber que variação existe.
+   */
   @Prop({ default: 0 })
   estoqueAtual: number;
 
@@ -67,6 +146,37 @@ export class Produto {
 }
 
 export const ProdutoSchema = SchemaFactory.createForClass(Produto);
+
+/**
+ * Capa do produto, derivada da galeria.
+ *
+ * Virtual em vez de campo gravado: se fosse gravado, apagar a primeira
+ * foto deixaria a capa apontando para uma imagem que não existe mais.
+ * Assim a capa é sempre a primeira da lista, por definição.
+ */
+ProdutoSchema.virtual('fotoUrl').get(function (this: Produto) {
+  return this.fotos?.[0]?.url ?? null;
+});
+
+ProdutoSchema.virtual('fotoPublicId').get(function (this: Produto) {
+  return this.fotos?.[0]?.publicId ?? null;
+});
+
+/** Atalho para a tela decidir se pede a variação antes de vender. */
+ProdutoSchema.virtual('usaVariacoes').get(function (this: Produto) {
+  return (this.variacoes?.length ?? 0) > 0;
+});
+
+/**
+ * Soma das variações — o saldo real do produto quando há grade.
+ *
+ * Quem grava é o EstoqueService, a cada movimento. Sem manter isso em
+ * dia, o card mostraria "0 em estoque" com 15 peças na 44 preta, ou o
+ * contrário, que é pior: deixar vender o que não existe.
+ */
+export function somarVariacoes(variacoes: Variacao[] | undefined): number {
+  return (variacoes ?? []).reduce((s, v) => s + (v.estoqueAtual || 0), 0);
+}
 
 ProdutoSchema.index({ nome: 'text' });
 ProdutoSchema.index({ categoria: 1, ativo: 1 });

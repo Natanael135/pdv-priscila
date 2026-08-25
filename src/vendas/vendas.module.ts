@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { MongooseModule } from '@nestjs/mongoose';
-import { Caixa, CaixaSchema } from '../caixa/caixa.schema';
 import { Cliente, ClienteSchema } from '../clientes/cliente.schema';
 import {
   CONTADOR,
@@ -25,7 +24,6 @@ import { VendasService } from './vendas.service';
       { name: Produto.name, schema: ProdutoSchema },
       { name: Cliente.name, schema: ClienteSchema },
       { name: Parcela.name, schema: ParcelaSchema },
-      { name: Caixa.name, schema: CaixaSchema },
       { name: Configuracao.name, schema: ConfiguracaoSchema },
       { name: CONTADOR, schema: ContadorSchema },
     ]),

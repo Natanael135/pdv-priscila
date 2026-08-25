@@ -33,6 +33,14 @@ export class VendaItem {
   @Prop({ required: true })
   produtoNome: string;
 
+  /** id da variação vendida, quando o produto tem grade */
+  @Prop({ type: String, default: null })
+  variacao: string | null;
+
+  /** "44 · Preto" — fotografado, para o cupom antigo continuar legível */
+  @Prop({ type: String, default: null })
+  variacaoDescricao: string | null;
+
   @Prop({ required: true, min: 0 })
   quantidade: number;
 
@@ -82,9 +90,6 @@ export class Venda {
   /** guardado junto para a lista não depender de popular o cliente */
   @Prop({ type: String, default: null })
   clienteNome: string | null;
-
-  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Caixa', default: null })
-  caixa: Types.ObjectId | null;
 
   @Prop({ default: () => new Date() })
   data: Date;
@@ -136,7 +141,6 @@ export const VendaSchema = SchemaFactory.createForClass(Venda);
 VendaSchema.index({ data: -1 });
 VendaSchema.index({ cliente: 1, data: -1 });
 VendaSchema.index({ status: 1, data: -1 });
-VendaSchema.index({ caixa: 1 });
 
 // Mongoose 9: pre-hook sem `next`, só async/return.
 VendaSchema.pre('save', function () {

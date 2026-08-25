@@ -75,10 +75,18 @@ export class ProdutosService {
     return comSituacao(produto);
   }
 
-  /** Busca exata — é o que o leitor de código de barras usa. */
+  /**
+   * Busca exata — é o que o leitor de código de barras usa.
+   *
+   * Procura no produto E nas variações: com grade, cada cor/tamanho
+   * costuma ter etiqueta própria, e é esse código que vem na peça.
+   */
   async porCodigoBarras(codigo: string) {
     const produto = await this.modelo
-      .findOne({ codigoBarras: codigo, ativo: true })
+      .findOne({
+        ativo: true,
+        $or: [{ codigoBarras: codigo }, { 'variacoes.codigoBarras': codigo }],
+      })
       .populate('categoria', 'nome cor icone')
       .exec();
 
@@ -118,16 +126,62 @@ export class ProdutosService {
       await this.garantirCodigoLivre(dto.codigoBarras);
     }
 
-    // trocou a foto: apaga a antiga do Cloudinary para não acumular lixo
-    if (
-      dto.fotoPublicId !== undefined &&
-      atual.fotoPublicId &&
-      dto.fotoPublicId !== atual.fotoPublicId
-    ) {
-      await this.uploads.remover(atual.fotoPublicId);
+    /**
+     * Fotos que saíram da galeria vão embora do Cloudinary também.
+     *
+     * Sem isto, cada troca de imagem deixaria um arquivo órfão lá,
+     * consumindo a cota da conta sem nunca mais ser exibido.
+     */
+    if (dto.fotos) {
+      const continuam = new Set(dto.fotos.map((f) => f.publicId));
+      const removidas = (atual.fotos ?? []).filter(
+        (f) => !continuam.has(f.publicId),
+      );
+
+      for (const foto of removidas) await this.uploads.remover(foto.publicId);
     }
 
-    await this.modelo.findByIdAndUpdate(id, dto, { returnDocument: 'after' }).exec();
+    /**
+     * Variações: mantém o saldo de quem já existia.
+     *
+     * O formulário devolve a grade inteira, inclusive o estoque que ele
+     * leu ao abrir. Gravar isso de volta apagaria qualquer venda ou
+     * entrada ocorrida no meio-tempo — o estoque só pode mudar por
+     * movimentação. Aqui a estrutura (cor, tamanho, preço) é atualizada
+     * e o saldo é preservado do que está no banco.
+     */
+    const atualizacao: Record<string, unknown> = { ...dto };
+
+    if (dto.variacoes) {
+      const saldoAnterior = new Map(
+        (atual.variacoes ?? []).map((v) => [
+          String((v as unknown as { _id: Types.ObjectId })._id),
+          v.estoqueAtual,
+        ]),
+      );
+
+      atualizacao.variacoes = dto.variacoes.map((v) => ({
+        // reaproveita o _id para o Mongoose entender que é a mesma linha
+        ...(v.id ? { _id: new Types.ObjectId(v.id) } : {}),
+        cor: v.cor ?? null,
+        tamanho: v.tamanho ?? null,
+        codigoBarras: v.codigoBarras ?? null,
+        estoqueMinimo: v.estoqueMinimo ?? 0,
+        precoVenda: v.precoVenda ?? null,
+        ativo: v.ativo ?? true,
+        estoqueAtual: v.id ? (saldoAnterior.get(v.id) ?? 0) : (v.estoqueAtual ?? 0),
+      }));
+
+      // o saldo do produto acompanha a soma da grade
+      atualizacao.estoqueAtual = (
+        atualizacao.variacoes as { estoqueAtual: number }[]
+      ).reduce((s, v) => s + v.estoqueAtual, 0);
+    }
+
+    await this.modelo
+      .findByIdAndUpdate(id, atualizacao, { returnDocument: 'after' })
+      .exec();
+
     return this.obter(id);
   }
 
@@ -188,7 +242,10 @@ export class ProdutosService {
       );
     }
 
-    if (produto.fotoPublicId) await this.uploads.remover(produto.fotoPublicId);
+    // a galeria inteira some junto com o produto
+    for (const foto of produto.fotos ?? []) {
+      await this.uploads.remover(foto.publicId);
+    }
 
     // o histórico de estoque não faz sentido sem o produto
     await this.estoque.removerHistoricoDoProduto(id);
