@@ -127,13 +127,13 @@ export class ProdutosService {
       await this.uploads.remover(atual.fotoPublicId);
     }
 
-    await this.modelo.findByIdAndUpdate(id, dto, { new: true }).exec();
+    await this.modelo.findByIdAndUpdate(id, dto, { returnDocument: 'after' }).exec();
     return this.obter(id);
   }
 
   async desativar(id: string) {
     const produto = await this.modelo
-      .findByIdAndUpdate(id, { ativo: false }, { new: true })
+      .findByIdAndUpdate(id, { ativo: false }, { returnDocument: 'after' })
       .exec();
 
     if (!produto) throw new NotFoundException('Produto não encontrado');
@@ -142,7 +142,7 @@ export class ProdutosService {
 
   async reativar(id: string) {
     const produto = await this.modelo
-      .findByIdAndUpdate(id, { ativo: true }, { new: true })
+      .findByIdAndUpdate(id, { ativo: true }, { returnDocument: 'after' })
       .exec();
 
     if (!produto) throw new NotFoundException('Produto não encontrado');

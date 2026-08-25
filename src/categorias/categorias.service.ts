@@ -50,7 +50,7 @@ export class CategoriasService {
 
   async atualizar(id: string, dto: AtualizarCategoriaDto) {
     const categoria = await this.modelo
-      .findByIdAndUpdate(id, dto, { new: true })
+      .findByIdAndUpdate(id, dto, { returnDocument: 'after' })
       .exec();
 
     if (!categoria) throw new NotFoundException('Categoria não encontrada');

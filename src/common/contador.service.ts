@@ -36,7 +36,7 @@ export class ContadorService {
       .findByIdAndUpdate(
         nome,
         { $inc: { valor: 1 } },
-        { new: true, upsert: true, session },
+        { returnDocument: 'after', upsert: true, session },
       )
       .lean<ContadorDoc>()
       .exec();

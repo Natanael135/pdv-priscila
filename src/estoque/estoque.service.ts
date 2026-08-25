@@ -67,7 +67,7 @@ export class EstoqueService {
       .findByIdAndUpdate(
         produto._id,
         { $inc: { estoqueAtual: delta } },
-        { new: true, session },
+        { returnDocument: 'after', session },
       )
       .exec();
 

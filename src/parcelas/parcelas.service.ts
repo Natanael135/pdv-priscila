@@ -84,7 +84,7 @@ export class ParcelasService {
   /** Renegociação: empurra o vencimento. */
   async alterarVencimento(id: string, vencimento: string) {
     const parcela = await this.modelo
-      .findByIdAndUpdate(id, { vencimento: dayjs(vencimento).toDate() }, { new: true })
+      .findByIdAndUpdate(id, { vencimento: dayjs(vencimento).toDate() }, { returnDocument: 'after' })
       .exec();
 
     if (!parcela) throw new NotFoundException('Parcela não encontrada');

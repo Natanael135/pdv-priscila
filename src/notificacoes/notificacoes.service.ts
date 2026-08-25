@@ -22,7 +22,7 @@ export class NotificacoesService {
 
   async marcarComoLida(id: string) {
     const doc = await this.modelo
-      .findByIdAndUpdate(id, { lida: true }, { new: true })
+      .findByIdAndUpdate(id, { lida: true }, { returnDocument: 'after' })
       .exec();
 
     if (!doc) throw new NotFoundException('Notificação não encontrada');

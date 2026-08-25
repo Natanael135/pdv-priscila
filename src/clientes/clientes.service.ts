@@ -92,7 +92,7 @@ export class ClientesService {
 
   async atualizar(id: string, dto: AtualizarClienteDto) {
     const cliente = await this.modelo
-      .findByIdAndUpdate(id, dto, { new: true })
+      .findByIdAndUpdate(id, dto, { returnDocument: 'after' })
       .exec();
 
     if (!cliente) throw new NotFoundException('Cliente não encontrado');
@@ -116,7 +116,7 @@ export class ClientesService {
 
   async desativar(id: string) {
     const cliente = await this.modelo
-      .findByIdAndUpdate(id, { ativo: false }, { new: true })
+      .findByIdAndUpdate(id, { ativo: false }, { returnDocument: 'after' })
       .exec();
 
     if (!cliente) throw new NotFoundException('Cliente não encontrado');
@@ -125,7 +125,7 @@ export class ClientesService {
 
   async reativar(id: string) {
     const cliente = await this.modelo
-      .findByIdAndUpdate(id, { ativo: true }, { new: true })
+      .findByIdAndUpdate(id, { ativo: true }, { returnDocument: 'after' })
       .exec();
 
     if (!cliente) throw new NotFoundException('Cliente não encontrado');
