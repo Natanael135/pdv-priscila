@@ -99,13 +99,48 @@ export class ProdutosService {
   async criar(dto: CriarProdutoDto) {
     await this.garantirCodigoLivre(dto.codigoBarras);
 
-    const { estoqueAtual, ...resto } = dto;
+    const { estoqueAtual, variacoes, ...resto } = dto;
 
-    const produto = await this.modelo.create({ ...resto, estoqueAtual: 0 });
+    /**
+     * O produto nasce zerado — inclusive as variações.
+     *
+     * O saldo inicial entra logo abaixo como MOVIMENTAÇÃO, não como
+     * campo gravado direto. Assim o primeiro estoque também tem
+     * história (com data, motivo e custo), e o saldo do produto sai
+     * somado da grade pelo mesmo caminho que todo o resto usa.
+     */
+    const produto = await this.modelo.create({
+      ...resto,
+      estoqueAtual: 0,
+      variacoes: (variacoes ?? []).map((v) => ({
+        cor: v.cor ?? null,
+        tamanho: v.tamanho ?? null,
+        codigoBarras: v.codigoBarras ?? null,
+        estoqueMinimo: v.estoqueMinimo ?? 0,
+        precoVenda: v.precoVenda ?? null,
+        ativo: v.ativo ?? true,
+        estoqueAtual: 0,
+      })),
+    });
 
-    // Estoque inicial entra como movimentação, não como campo solto:
-    // assim o primeiro saldo também tem história e o custo fica registrado.
-    if (estoqueAtual && estoqueAtual > 0) {
+    if (variacoes?.length) {
+      // uma entrada por variação que veio com quantidade
+      for (let i = 0; i < variacoes.length; i++) {
+        const inicial = variacoes[i].estoqueAtual ?? 0;
+        if (inicial <= 0) continue;
+
+        const criada = produto.variacoes[i] as unknown as { _id: Types.ObjectId };
+
+        await this.estoque.movimentar({
+          produtoId: produto._id,
+          variacaoId: String(criada._id),
+          tipo: 'entrada',
+          quantidade: inicial,
+          custoUnitario: dto.precoCompra,
+          motivo: 'Estoque inicial do cadastro',
+        });
+      }
+    } else if (estoqueAtual && estoqueAtual > 0) {
       await this.estoque.movimentar({
         produtoId: produto._id,
         tipo: 'entrada',
