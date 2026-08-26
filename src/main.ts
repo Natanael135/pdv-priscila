@@ -10,7 +10,11 @@ async function bootstrap() {
   // Sem login ainda, então não há cookie/credencial para proteger.
   app.enableCors({ origin: true });
 
-  app.setGlobalPrefix('api');
+  /**
+   * A vitrine fica fora do prefixo: o link vai para o WhatsApp do
+   * cliente, e /loja é bem mais fácil de ditar do que /api/publico/loja.
+   */
+  app.setGlobalPrefix('api', { exclude: ['loja'] });
 
   // sem isso, índice único violado vira 500 sem explicação
   app.useGlobalFilters(new MongoExceptionFilter());

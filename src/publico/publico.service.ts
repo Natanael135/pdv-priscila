@@ -1,0 +1,310 @@
+import {
+  BadRequestException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { InjectModel } from '@nestjs/mongoose';
+import { randomBytes } from 'crypto';
+import { Model, Types } from 'mongoose';
+import { Cliente } from '../clientes/cliente.schema';
+import { ContadorService } from '../common/contador.service';
+import { dinheiro } from '../common/margem';
+import { Configuracao } from '../configuracoes/configuracao.schema';
+import { NotificacoesService } from '../notificacoes/notificacoes.service';
+import { ItemPedido, Pedido, PedidoDocument } from '../pedidos/pedido.schema';
+import { Produto } from '../produtos/produto.schema';
+import { PushService } from '../push/push.service';
+import { CriarPedidoDto, PreCadastroDto } from './publico.dto';
+import { SessaoPublica, SessaoPublicaDocument } from './sessao.schema';
+
+@Injectable()
+export class PublicoService {
+  constructor(
+    @InjectModel(Produto.name) private readonly produtos: Model<Produto>,
+    @InjectModel(Cliente.name) private readonly clientes: Model<Cliente>,
+    @InjectModel(Pedido.name) private readonly pedidos: Model<PedidoDocument>,
+    @InjectModel(SessaoPublica.name)
+    private readonly sessoes: Model<SessaoPublicaDocument>,
+    @InjectModel(Configuracao.name)
+    private readonly configuracoes: Model<Configuracao>,
+    private readonly contador: ContadorService,
+    private readonly push: PushService,
+    private readonly notificacoes: NotificacoesService,
+  ) {}
+
+  /** Nome, logo e WhatsApp — o cabeçalho da loja no catálogo. */
+  async loja() {
+    const config = await this.configuracoes.findOne().lean().exec();
+
+    return {
+      nomeLoja: config?.nomeLoja ?? 'Catálogo',
+      logoUrl: config?.logoUrl ?? null,
+      telefone: config?.telefone ?? null,
+      endereco: config?.endereco ?? null,
+    };
+  }
+
+  /**
+   * O catálogo como o cliente vê.
+   *
+   * Monta o objeto campo a campo em vez de devolver o produto inteiro.
+   * É deliberado: o documento do produto carrega preço de compra,
+   * margem, lucro e saldo de estoque, e devolvê-lo "só filtrando no
+   * front" publicaria tudo isso na resposta da API para quem abrisse o
+   * DevTools. Aqui esses campos nem saem do servidor.
+   *
+   * De estoque sai apenas disponível ou não — a mesma regra do catálogo
+   * em PDF.
+   */
+  async catalogo() {
+    const produtos = await this.produtos
+      .find({ ativo: true })
+      .populate('categoria', 'nome cor icone')
+      .sort({ nome: 1 })
+      .exec();
+
+    return produtos.map((p) => {
+      const variacoes = (p.variacoes ?? [])
+        .filter((v) => v.ativo)
+        .map((v) => {
+          const id = (v as unknown as { _id: Types.ObjectId })._id;
+          return {
+            id: String(id),
+            descricao:
+              [v.tamanho, v.cor].filter(Boolean).join(' · ') || 'Padrão',
+            preco: v.precoVenda ?? p.precoVenda,
+            disponivel: !p.controlaEstoque || v.estoqueAtual > 0,
+            fotoUrl:
+              (p.fotos ?? []).find((f) => String(f.variacaoId) === String(id))
+                ?.url ?? null,
+          };
+        });
+
+      const categoria = p.categoria as unknown as { nome?: string } | null;
+
+      return {
+        id: String((p as unknown as { _id: Types.ObjectId })._id),
+        nome: p.nome,
+        descricao: p.descricao,
+        preco: p.precoVenda,
+        fotoUrl: p.fotos?.[0]?.url ?? null,
+        fotos: (p.fotos ?? []).map((f) => f.url),
+        categoria: categoria?.nome ?? 'Outros',
+        disponivel: !p.controlaEstoque || p.estoqueAtual > 0,
+        usaVariacoes: variacoes.length > 0,
+        variacoes,
+      };
+    });
+  }
+
+  /**
+   * Pré-cadastro: nome e WhatsApp, sem senha.
+   *
+   * Reaproveita o cliente que já existe com aquele telefone em vez de
+   * criar um duplicado — assim o pedido do catálogo cai na mesma ficha
+   * de quem já compra no balcão, e a loja não fica com dois cadastros
+   * da mesma pessoa.
+   */
+  async preCadastro(dto: PreCadastroDto) {
+    const telefone = dto.telefone.replace(/\D/g, '');
+
+    let cliente = await this.clientes.findOne({ telefone }).exec();
+
+    if (!cliente) {
+      cliente = await this.clientes.create({
+        nome: dto.nome.trim(),
+        telefone,
+      });
+    }
+
+    const token = randomBytes(32).toString('hex');
+
+    const sessao = await this.sessoes.create({
+      token,
+      cliente: (cliente as unknown as { _id: Types.ObjectId })._id,
+      nome: dto.nome.trim(),
+      telefone,
+    });
+
+    return {
+      token: sessao.token,
+      nome: sessao.nome,
+      telefone: sessao.telefone,
+    };
+  }
+
+  /** Traduz o token do navegador na sessão. */
+  private async sessaoPeloToken(token: string | undefined) {
+    if (!token) throw new UnauthorizedException('Faça seu cadastro primeiro');
+
+    const sessao = await this.sessoes.findOne({ token }).exec();
+    if (!sessao) throw new UnauthorizedException('Cadastro não encontrado');
+
+    return sessao;
+  }
+
+  /** Confere se o token ainda vale e devolve quem é. */
+  async euSou(token: string | undefined) {
+    const sessao = await this.sessaoPeloToken(token);
+
+    sessao.ultimoUso = new Date();
+    await sessao.save();
+
+    return { nome: sessao.nome, telefone: sessao.telefone };
+  }
+
+  /**
+   * Registra o pedido.
+   *
+   * Os preços vêm do BANCO, nunca do que o navegador mandou: o corpo da
+   * requisição é editável por qualquer um, e aceitar preço de lá
+   * deixaria um lençol de R$ 300 ser pedido por R$ 3. O cliente só diz
+   * o que quer e quanto — o valor quem decide é o servidor.
+   *
+   * Também NÃO baixa estoque. Pedido é intenção; a mercadoria só sai
+   * quando a loja confirma e a venda nasce.
+   */
+  async criarPedido(token: string | undefined, dto: CriarPedidoDto) {
+    const sessao = await this.sessaoPeloToken(token);
+
+    const itens: ItemPedido[] = [];
+
+    for (const pedido of dto.itens) {
+      const produto = await this.produtos.findById(pedido.produto).exec();
+
+      if (!produto || !produto.ativo) {
+        throw new BadRequestException('Um dos produtos não está mais à venda');
+      }
+
+      let variacaoId: Types.ObjectId | null = null;
+      let variacaoDescricao: string | null = null;
+      let preco = produto.precoVenda;
+
+      if ((produto.variacoes ?? []).length > 0) {
+        if (!pedido.variacao) {
+          throw new BadRequestException(
+            `Escolha a opção de "${produto.nome}"`,
+          );
+        }
+
+        const variacao = produto.variacoes.find(
+          (v) =>
+            String((v as unknown as { _id: Types.ObjectId })._id) ===
+            pedido.variacao,
+        );
+
+        if (!variacao || !variacao.ativo) {
+          throw new BadRequestException(
+            `A opção escolhida de "${produto.nome}" não está mais disponível`,
+          );
+        }
+
+        variacaoId = (variacao as unknown as { _id: Types.ObjectId })._id;
+        variacaoDescricao =
+          [variacao.tamanho, variacao.cor].filter(Boolean).join(' · ') ||
+          'Padrão';
+        preco = variacao.precoVenda ?? produto.precoVenda;
+      }
+
+      itens.push({
+        produto: (produto as unknown as { _id: Types.ObjectId })._id,
+        produtoNome: produto.nome,
+        variacao: variacaoId,
+        variacaoDescricao,
+        quantidade: pedido.quantidade,
+        precoUnitario: preco,
+        total: dinheiro(preco * pedido.quantidade),
+      });
+    }
+
+    const total = dinheiro(itens.reduce((s, i) => s + i.total, 0));
+    const numero = await this.contador.proximo('pedido');
+
+    const criado = await this.pedidos.create({
+      numero,
+      cliente: sessao.cliente,
+      clienteNome: sessao.nome,
+      clienteTelefone: sessao.telefone,
+      sessao: (sessao as unknown as { _id: Types.ObjectId })._id,
+      itens,
+      total,
+      observacao: dto.observacao?.trim() || null,
+      status: 'novo',
+    });
+
+    await this.avisarALoja(criado);
+
+    return this.paraOCliente(criado);
+  }
+
+  /**
+   * Avisa a loja na hora.
+   *
+   * Aqui o push é imediato, ao contrário dos avisos de estoque: pedido
+   * é evento, e um cliente esperando resposta não pode depender do
+   * resumo do dia seguinte. Falhar não pode derrubar o pedido — ele já
+   * está gravado, e a tela de pedidos mostra de qualquer jeito.
+   */
+  private async avisarALoja(pedido: PedidoDocument) {
+    const itens = pedido.itens.reduce((s, i) => s + i.quantidade, 0);
+
+    try {
+      await this.push.enviar(
+        'Novo pedido',
+        `${pedido.clienteNome} pediu ${itens} ${itens === 1 ? 'item' : 'itens'} · ` +
+          pedido.total.toLocaleString('pt-BR', {
+            style: 'currency',
+            currency: 'BRL',
+          }),
+        { tela: 'PedidoDetalhe', id: String(pedido._id) },
+      );
+    } catch {
+      // sem push a loja ainda vê o pedido na tela; perder o aviso é
+      // ruim, perder o pedido seria pior
+    }
+
+    await this.notificacoes.avisarPedidoNovo({
+      pedidoId: pedido._id,
+      numero: pedido.numero,
+      clienteNome: pedido.clienteNome,
+      total: pedido.total,
+    });
+  }
+
+  /** Os pedidos deste navegador, do mais novo para trás. */
+  async meusPedidos(token: string | undefined) {
+    const sessao = await this.sessaoPeloToken(token);
+
+    const pedidos = await this.pedidos
+      .find({ sessao: (sessao as unknown as { _id: Types.ObjectId })._id })
+      .sort({ criadoEm: -1 })
+      .limit(50)
+      .exec();
+
+    return pedidos.map((p) => this.paraOCliente(p));
+  }
+
+  /**
+   * O pedido como o cliente pode ver.
+   *
+   * Recorta os campos de propósito: o documento guarda o motivo da
+   * recusa e o id da venda, que são anotações internas da loja.
+   */
+  private paraOCliente(pedido: PedidoDocument) {
+    return {
+      id: String(pedido._id),
+      numero: pedido.numero,
+      status: pedido.status,
+      total: pedido.total,
+      observacao: pedido.observacao,
+      criadoEm: pedido.criadoEm,
+      itens: pedido.itens.map((i) => ({
+        produtoNome: i.produtoNome,
+        variacaoDescricao: i.variacaoDescricao,
+        quantidade: i.quantidade,
+        precoUnitario: i.precoUnitario,
+        total: i.total,
+      })),
+    };
+  }
+}

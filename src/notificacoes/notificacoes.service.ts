@@ -104,6 +104,43 @@ export class NotificacoesService {
   }
 
   /**
+   * Chegou pedido pelo catálogo.
+   *
+   * Um aviso por pedido, sem agrupar: cada um é uma pessoa esperando
+   * resposta, e somar "3 pedidos" esconderia justamente quem está
+   * esperando há mais tempo.
+   */
+  async avisarPedidoNovo(params: {
+    pedidoId: Types.ObjectId;
+    numero: number;
+    clienteNome: string;
+    total: number;
+  }) {
+    const valor = params.total.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+    });
+
+    await this.modelo.create({
+      tipo: 'pedido_novo',
+      titulo: `Pedido #${params.numero}`,
+      mensagem: `${params.clienteNome} fez um pedido de ${valor}.`,
+      pedido: params.pedidoId,
+      referencia: String(params.numero),
+      // nasce avisado porque o push já saiu na hora; sem isto o resumo
+      // do dia apitaria de novo pelo mesmo pedido
+      avisado: true,
+    });
+  }
+
+  /** Some com o aviso quando a loja responde o pedido. */
+  async limparAvisoDePedido(pedidoId: Types.ObjectId) {
+    await this.modelo
+      .deleteMany({ pedido: pedidoId, tipo: 'pedido_novo', lida: false })
+      .exec();
+  }
+
+  /**
    * Lembrete do dia: hoje é dia de receber deste cliente.
    *
    * Separado do aviso de atraso de propósito. São conversas diferentes

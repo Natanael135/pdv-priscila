@@ -10,6 +10,7 @@ import {
 } from '../common/fuso';
 import { dinheiro, margemDoTotal } from '../common/margem';
 import { Parcela } from '../parcelas/parcela.schema';
+import { GastosService } from '../gastos/gastos.service';
 import { Produto } from '../produtos/produto.schema';
 import { Venda } from '../vendas/venda.schema';
 
@@ -19,6 +20,7 @@ export class DashboardService {
     @InjectModel(Venda.name) private readonly vendas: Model<Venda>,
     @InjectModel(Produto.name) private readonly produtos: Model<Produto>,
     @InjectModel(Parcela.name) private readonly parcelas: Model<Parcela>,
+    private readonly gastos: GastosService,
   ) {}
 
   async resumo(inicioTexto?: string, fimTexto?: string) {
@@ -58,6 +60,20 @@ export class DashboardService {
       this.estoque(),
     ]);
 
+    /**
+     * Despesa do período — o que separa margem bruta de lucro.
+     *
+     * Sem isto o "lucro" do painel era só faturamento menos o custo da
+     * mercadoria: um mês podia fechar com R$ 3.000 de "lucro" e no
+     * bolso não sobrar nada depois do aluguel e da luz. É a diferença
+     * entre saber quanto a mercadoria rende e saber quanto a loja
+     * ganha.
+     */
+    const totalGastos = await this.gastos.totalDoPeriodo(
+      inicio.toDate(),
+      fim.toDate(),
+    );
+
     const melhorDia =
       porDia.length > 0
         ? porDia.reduce((a, b) => (b.faturamento > a.faturamento ? b : a))
@@ -66,6 +82,14 @@ export class DashboardService {
     return {
       periodo: { inicio: inicio.format('YYYY-MM-DD'), fim: fim.format('YYYY-MM-DD') },
       ...totais,
+      gastos: totalGastos,
+      /**
+       * O bruto continua exposto como `lucro`, de propósito: é o número
+       * que mede a mercadoria, e some-lo com a despesa fixa esconderia
+       * um produto vendido no prejuízo dentro de um mês de aluguel
+       * barato. São duas perguntas, e cada uma tem seu campo.
+       */
+      lucroLiquido: dinheiro(totais.lucro - totalGastos),
       porDia,
       melhorDia: melhorDia && melhorDia.faturamento > 0 ? melhorDia : null,
       melhorDiaSemana,

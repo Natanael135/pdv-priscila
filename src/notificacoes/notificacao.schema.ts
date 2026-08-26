@@ -10,6 +10,8 @@ export const TIPOS_NOTIFICACAO = [
   /** vence hoje — lembrete, ainda não é atraso */
   'fiado_cobrar_hoje',
   'fiado_vencido',
+  /** chegou pedido pelo catálogo online */
+  'pedido_novo',
 ] as const;
 
 export type TipoNotificacao = (typeof TIPOS_NOTIFICACAO)[number];
@@ -33,6 +35,9 @@ export class Notificacao {
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Venda', default: null })
   venda: Types.ObjectId | null;
+
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Pedido', default: null })
+  pedido: Types.ObjectId | null;
 
   /**
    * Do que este aviso trata, para não repetir.
