@@ -193,18 +193,97 @@ export class PublicoService {
     return sessao;
   }
 
-  /** Confere se o token ainda vale e devolve quem é. */
+  /**
+   * Quem é, e o que ainda dá para preencher.
+   *
+   * `travados` diz quais campos já têm valor. É por ele que o site
+   * mostra o cadeado e o recado de falar com a loja, em vez de exibir
+   * um campo editável que a API vai recusar depois.
+   */
   async euSou(token: string | undefined) {
     const sessao = await this.sessaoPeloToken(token);
 
     sessao.ultimoUso = new Date();
     await sessao.save();
 
+    const cliente = await this.clientes.findById(sessao.cliente).lean().exec();
+
     return {
-      nome: sessao.nome,
-      telefone: sessao.telefone,
-      endereco: sessao.endereco,
+      nome: cliente?.nome ?? sessao.nome,
+      telefone: cliente?.telefone ?? sessao.telefone,
+      endereco: cliente?.endereco ?? sessao.endereco,
+      email: cliente?.email ?? null,
+      documento: cliente?.documento ?? null,
+      travados: {
+        nome: true,
+        telefone: true,
+        endereco: !!cliente?.endereco,
+        email: !!cliente?.email,
+        documento: !!cliente?.documento,
+      },
     };
+  }
+
+  /**
+   * Preencher o que falta na ficha — só o que está vazio.
+   *
+   * Corrigir um dado já preenchido exige falar com a loja, e isso é
+   * decisão do negócio, não limitação técnica: o endereço e o
+   * documento entram em entrega e em nota, e deixar o cliente
+   * reescrevê-los sozinho abriria caminho para pedido desviado ou nota
+   * emitida no nome errado. Preencher o que falta é seguro; reescrever
+   * o que existe, não.
+   */
+  async completarPerfil(
+    token: string | undefined,
+    dados: { email?: string; endereco?: string; documento?: string },
+  ) {
+    const sessao = await this.sessaoPeloToken(token);
+
+    const cliente = await this.clientes.findById(sessao.cliente).exec();
+    if (!cliente) throw new NotFoundException('Cadastro não encontrado');
+
+    const travados: string[] = [];
+    const campos: Record<string, string> = {};
+
+    const tentar = (campo: 'email' | 'endereco' | 'documento', valor?: string) => {
+      const limpo = valor?.trim();
+      if (!limpo) return;
+
+      if (cliente[campo]) {
+        travados.push(campo);
+        return;
+      }
+      campos[campo] = limpo;
+    };
+
+    tentar('email', dados.email);
+    tentar('endereco', dados.endereco);
+    tentar('documento', dados.documento?.replace(/\D/g, ''));
+
+    if (travados.length) {
+      const nomes: Record<string, string> = {
+        email: 'e-mail',
+        endereco: 'endereço',
+        documento: 'CPF',
+      };
+
+      throw new BadRequestException(
+        `Para alterar ${travados.map((t) => nomes[t]).join(' e ')}, ` +
+          'fale com a loja pelo WhatsApp.',
+      );
+    }
+
+    Object.assign(cliente, campos);
+    await cliente.save();
+
+    // o endereço novo vale para o próximo pedido sem redigitar
+    if (campos.endereco) {
+      sessao.endereco = campos.endereco;
+      await sessao.save();
+    }
+
+    return this.euSou(token);
   }
 
   /**

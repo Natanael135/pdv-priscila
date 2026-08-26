@@ -2,6 +2,7 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsEmail,
   IsIn,
   IsInt,
   IsNumber,
@@ -61,6 +62,29 @@ export class PreCadastroDto {
     message: 'WhatsApp inválido — use DDD + número, só dígitos',
   })
   telefone: string;
+}
+
+/**
+ * O que o cliente pode preencher na própria ficha.
+ *
+ * Só campos vazios são aceitos — ver PublicoService.completarPerfil.
+ * Nome e telefone não entram aqui de propósito: são a identidade, e
+ * mudá-los pelo site seria trocar de pessoa.
+ */
+export class CompletarPerfilDto {
+  @IsOptional()
+  @IsEmail({}, { message: 'E-mail inválido' })
+  email?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  endereco?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  documento?: string;
 }
 
 export class ItemDoPedidoDto {

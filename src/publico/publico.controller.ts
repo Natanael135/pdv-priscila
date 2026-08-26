@@ -1,5 +1,10 @@
-import { Body, Controller, Get, Headers, Post } from '@nestjs/common';
-import { CriarPedidoDto, EntrarDto, PreCadastroDto } from './publico.dto';
+import { Body, Controller, Get, Headers, Patch, Post } from '@nestjs/common';
+import {
+  CompletarPerfilDto,
+  CriarPedidoDto,
+  EntrarDto,
+  PreCadastroDto,
+} from './publico.dto';
 import { PublicoService } from './publico.service';
 
 /**
@@ -40,6 +45,14 @@ export class PublicoController {
   @Get('eu')
   eu(@Headers('x-sessao') token: string) {
     return this.service.euSou(token);
+  }
+
+  @Patch('eu')
+  completar(
+    @Headers('x-sessao') token: string,
+    @Body() dto: CompletarPerfilDto,
+  ) {
+    return this.service.completarPerfil(token, dto);
   }
 
   @Post('pedidos')
