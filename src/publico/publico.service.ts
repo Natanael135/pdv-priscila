@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  NotFoundException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
@@ -8,7 +9,7 @@ import { randomBytes } from 'crypto';
 import { Model, Types } from 'mongoose';
 import { Cliente } from '../clientes/cliente.schema';
 import { ContadorService } from '../common/contador.service';
-import { dinheiro } from '../common/margem';
+import { dinheiro, moeda } from '../common/margem';
 import { Configuracao } from '../configuracoes/configuracao.schema';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
 import { ItemPedido, Pedido, PedidoDocument } from '../pedidos/pedido.schema';
@@ -119,17 +120,66 @@ export class PublicoService {
 
     const token = randomBytes(32).toString('hex');
 
+    const endereco = dto.endereco?.trim() || null;
+
+    /**
+     * O endereço também vai para a ficha do cliente quando ela ainda
+     * não tem um. Assim a loja consulta a entrega pelo cadastro de
+     * sempre, sem precisar abrir o pedido.
+     */
+    if (endereco && !cliente.endereco) {
+      cliente.endereco = endereco;
+      await cliente.save();
+    }
+
     const sessao = await this.sessoes.create({
       token,
       cliente: (cliente as unknown as { _id: Types.ObjectId })._id,
       nome: dto.nome.trim(),
       telefone,
+      endereco,
     });
 
     return {
       token: sessao.token,
       nome: sessao.nome,
       telefone: sessao.telefone,
+      endereco: sessao.endereco,
+    };
+  }
+
+  /**
+   * Entrar com o número já conhecido.
+   *
+   * Devolve 404 quando o telefone não está cadastrado — é o que o site
+   * usa para decidir entre "entrar" e "pedir nome e endereço".
+   */
+  async entrar(telefoneBruto: string) {
+    const telefone = telefoneBruto.replace(/\D/g, '');
+
+    const cliente = await this.clientes.findOne({ telefone, ativo: true }).exec();
+
+    if (!cliente) {
+      throw new NotFoundException(
+        'Não encontrei esse número. Vamos fazer seu cadastro.',
+      );
+    }
+
+    const token = randomBytes(32).toString('hex');
+
+    const sessao = await this.sessoes.create({
+      token,
+      cliente: (cliente as unknown as { _id: Types.ObjectId })._id,
+      nome: cliente.nome,
+      telefone,
+      endereco: cliente.endereco ?? null,
+    });
+
+    return {
+      token: sessao.token,
+      nome: sessao.nome,
+      telefone: sessao.telefone,
+      endereco: sessao.endereco,
     };
   }
 
@@ -150,7 +200,11 @@ export class PublicoService {
     sessao.ultimoUso = new Date();
     await sessao.save();
 
-    return { nome: sessao.nome, telefone: sessao.telefone };
+    return {
+      nome: sessao.nome,
+      telefone: sessao.telefone,
+      endereco: sessao.endereco,
+    };
   }
 
   /**
@@ -166,6 +220,20 @@ export class PublicoService {
    */
   async criarPedido(token: string | undefined, dto: CriarPedidoDto) {
     const sessao = await this.sessaoPeloToken(token);
+
+    /**
+     * Entrega sem endereço é um pedido que a loja não consegue cumprir.
+     * A validação mora aqui, e não no DTO, porque depende de OUTRO
+     * campo do mesmo corpo — e é o tipo de regra que o class-validator
+     * expressa mal.
+     */
+    const endereco = dto.endereco?.trim() || sessao.endereco || null;
+
+    if (dto.entrega === 'entrega' && !endereco) {
+      throw new BadRequestException(
+        'Informe o endereço para entrega, ou escolha retirar na loja',
+      );
+    }
 
     const itens: ItemPedido[] = [];
 
@@ -220,6 +288,24 @@ export class PublicoService {
     const total = dinheiro(itens.reduce((s, i) => s + i.total, 0));
     const numero = await this.contador.proximo('pedido');
 
+    if (
+      dto.formaPagamento === 'dinheiro' &&
+      dto.trocoPara != null &&
+      dto.trocoPara > 0 &&
+      dto.trocoPara < total
+    ) {
+      throw new BadRequestException(
+        `O troco pedido (${moeda(dto.trocoPara)}) é menor que o total ` +
+          `(${moeda(total)}). Confira o valor.`,
+      );
+    }
+
+    // guarda o endereço na sessão para o próximo pedido já vir preenchido
+    if (endereco && endereco !== sessao.endereco) {
+      sessao.endereco = endereco;
+      await sessao.save();
+    }
+
     const criado = await this.pedidos.create({
       numero,
       cliente: sessao.cliente,
@@ -228,6 +314,11 @@ export class PublicoService {
       sessao: (sessao as unknown as { _id: Types.ObjectId })._id,
       itens,
       total,
+      entrega: dto.entrega,
+      endereco: dto.entrega === 'entrega' ? endereco : null,
+      formaPagamento: dto.formaPagamento,
+      trocoPara:
+        dto.formaPagamento === 'dinheiro' ? (dto.trocoPara ?? null) : null,
       observacao: dto.observacao?.trim() || null,
       status: 'novo',
     });
@@ -275,8 +366,20 @@ export class PublicoService {
   async meusPedidos(token: string | undefined) {
     const sessao = await this.sessaoPeloToken(token);
 
+    /**
+     * Por CLIENTE, não por sessão.
+     *
+     * Antes era por sessão, para ninguém digitar o telefone de outra
+     * pessoa e ler as compras dela. Com o login por número, essa
+     * proteção deixou de existir por decisão de produto — e prender o
+     * histórico à sessão só faria o login não mostrar nada em aparelho
+     * novo, que é justamente para o que ele serve.
+     *
+     * O que protege agora é só conhecer o número. Confirmação por
+     * código no WhatsApp resolveria; ainda não existe.
+     */
     const pedidos = await this.pedidos
-      .find({ sessao: (sessao as unknown as { _id: Types.ObjectId })._id })
+      .find({ cliente: sessao.cliente })
       .sort({ criadoEm: -1 })
       .limit(50)
       .exec();
@@ -296,6 +399,10 @@ export class PublicoService {
       numero: pedido.numero,
       status: pedido.status,
       total: pedido.total,
+      entrega: pedido.entrega,
+      endereco: pedido.endereco,
+      formaPagamento: pedido.formaPagamento,
+      trocoPara: pedido.trocoPara,
       observacao: pedido.observacao,
       criadoEm: pedido.criadoEm,
       itens: pedido.itens.map((i) => ({

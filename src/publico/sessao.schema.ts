@@ -32,6 +32,10 @@ export class SessaoPublica {
   @Prop({ required: true })
   telefone: string;
 
+  /** último endereço usado, para não digitar de novo a cada pedido */
+  @Prop({ type: String, default: null })
+  endereco: string | null;
+
   @Prop({ type: Date, default: Date.now })
   ultimoUso: Date;
 }

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Headers, Post } from '@nestjs/common';
-import { CriarPedidoDto, PreCadastroDto } from './publico.dto';
+import { CriarPedidoDto, EntrarDto, PreCadastroDto } from './publico.dto';
 import { PublicoService } from './publico.service';
 
 /**
@@ -25,6 +25,11 @@ export class PublicoController {
   @Get('catalogo')
   catalogo() {
     return this.service.catalogo();
+  }
+
+  @Post('entrar')
+  entrar(@Body() dto: EntrarDto) {
+    return this.service.entrar(dto.telefone);
   }
 
   @Post('cadastro')

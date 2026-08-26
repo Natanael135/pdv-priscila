@@ -2,7 +2,9 @@ import { Type } from 'class-transformer';
 import {
   ArrayMinSize,
   IsArray,
+  IsIn,
   IsInt,
+  IsNumber,
   IsMongoId,
   IsOptional,
   IsString,
@@ -12,8 +14,36 @@ import {
   MinLength,
   ValidateNested,
 } from 'class-validator';
+import {
+  FORMAS_PAGAMENTO_PEDIDO,
+  TIPOS_ENTREGA,
+} from '../pedidos/pedido.schema';
+import type {
+  FormaPagamentoPedido,
+  TipoEntrega,
+} from '../pedidos/pedido.schema';
+
+/**
+ * Entrar com o número, sem senha.
+ *
+ * Reconhecendo o telefone, a pessoa entra direto e vê os pedidos dela.
+ * Não reconhecendo, a API responde 404 e o site pede nome e endereço.
+ */
+export class EntrarDto {
+  @IsString()
+  @Matches(/^\d{10,11}$/, {
+    message: 'WhatsApp inválido — use DDD + número',
+  })
+  telefone: string;
+}
 
 export class PreCadastroDto {
+  /** guardado para preencher sozinho no próximo pedido */
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  endereco?: string;
+
   @IsString()
   @MinLength(2, { message: 'Diga seu nome' })
   @MaxLength(80)
@@ -47,6 +77,23 @@ export class ItemDoPedidoDto {
 }
 
 export class CriarPedidoDto {
+  @IsIn(TIPOS_ENTREGA, { message: 'Escolha retirada ou entrega' })
+  entrega: TipoEntrega;
+
+  /** exigido quando é entrega — a validação está no service */
+  @IsOptional()
+  @IsString()
+  @MaxLength(300)
+  endereco?: string;
+
+  @IsIn(FORMAS_PAGAMENTO_PEDIDO, { message: 'Forma de pagamento inválida' })
+  formaPagamento: FormaPagamentoPedido;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  trocoPara?: number;
+
   @IsArray()
   @ArrayMinSize(1, { message: 'Escolha pelo menos um produto' })
   @ValidateNested({ each: true })

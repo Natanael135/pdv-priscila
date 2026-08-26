@@ -9,7 +9,7 @@ import { ClientSession, Connection, Model, QueryFilter, Types } from 'mongoose';
 import { Cliente, ClienteDocument } from '../clientes/cliente.schema';
 import { ContadorService } from '../common/contador.service';
 import { fimDoDia, inicioDoDia } from '../common/fuso';
-import { dinheiro } from '../common/margem';
+import { dinheiro, moeda } from '../common/margem';
 import { Configuracao } from '../configuracoes/configuracao.schema';
 import { EstoqueService } from '../estoque/estoque.service';
 import { Parcela } from '../parcelas/parcela.schema';
@@ -445,9 +445,6 @@ export class VendasService {
   }
 }
 
-function moeda(n: number) {
-  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}
 
 function escapar(texto: string) {
   return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

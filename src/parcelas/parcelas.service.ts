@@ -7,7 +7,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import dayjs from 'dayjs';
 import { Model, QueryFilter, Types } from 'mongoose';
 import { fimDoDia, hojeNaLoja, inicioDoDia } from '../common/fuso';
-import { dinheiro } from '../common/margem';
+import { dinheiro, moeda } from '../common/margem';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
 import { Venda } from '../vendas/venda.schema';
 import { Parcela, ParcelaDocument } from './parcela.schema';
@@ -388,6 +388,3 @@ export class ParcelasService {
   }
 }
 
-function moeda(n: number) {
-  return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-}

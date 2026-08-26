@@ -64,6 +64,19 @@ export function margemDoTotal(faturamento: number, custo: number): number {
   return duasCasas(((faturamento - custo) / faturamento) * 100);
 }
 
+/**
+ * Valor em reais, para MENSAGEM — nunca para cálculo.
+ *
+ * Estava duplicado em parcelas e vendas; na terceira cópia virou
+ * problema de manutenção, então mudou de casa.
+ */
+export function moeda(n: number): string {
+  return (n || 0).toLocaleString('pt-BR', {
+    style: 'currency',
+    currency: 'BRL',
+  });
+}
+
 /** Arredondamento de dinheiro — evita 0.1 + 0.2 aparecer no total. */
 export function dinheiro(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;

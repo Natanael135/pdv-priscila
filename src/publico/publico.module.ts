@@ -10,7 +10,6 @@ import { NotificacoesModule } from '../notificacoes/notificacoes.module';
 import { Pedido, PedidoSchema } from '../pedidos/pedido.schema';
 import { Produto, ProdutoSchema } from '../produtos/produto.schema';
 import { PushModule } from '../push/push.module';
-import { LojaController } from './loja.controller';
 import { PublicoController } from './publico.controller';
 import { PublicoService } from './publico.service';
 import { SessaoPublica, SessaoPublicaSchema } from './sessao.schema';
@@ -28,7 +27,7 @@ import { SessaoPublica, SessaoPublicaSchema } from './sessao.schema';
     PushModule,
     NotificacoesModule,
   ],
-  controllers: [PublicoController, LojaController],
+  controllers: [PublicoController],
   providers: [PublicoService, ContadorService],
 })
 export class PublicoModule {}

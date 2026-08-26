@@ -4,6 +4,25 @@ import { opcoesSchema } from '../common/schema-options';
 
 export type PedidoDocument = HydratedDocument<Pedido>;
 
+export const TIPOS_ENTREGA = ['retirada', 'entrega'] as const;
+export type TipoEntrega = (typeof TIPOS_ENTREGA)[number];
+
+/**
+ * Como o cliente PRETENDE pagar.
+ *
+ * É uma declaração de intenção, não um pagamento: quem registra o
+ * dinheiro de verdade é a loja, ao fechar a venda. Serve para a loja
+ * já levar a maquininha na entrega, ou mandar a chave Pix antes.
+ */
+export const FORMAS_PAGAMENTO_PEDIDO = [
+  'pix',
+  'dinheiro',
+  'credito',
+  'debito',
+] as const;
+
+export type FormaPagamentoPedido = (typeof FORMAS_PAGAMENTO_PEDIDO)[number];
+
 export const STATUS_PEDIDO = [
   'novo',
   'aceito',
@@ -91,6 +110,37 @@ export class Pedido {
 
   @Prop({ required: true, min: 0 })
   total: number;
+
+  @Prop({ type: String, required: true, enum: TIPOS_ENTREGA, default: 'retirada' })
+  entrega: TipoEntrega;
+
+  /**
+   * Endereço da entrega — obrigatório quando não é retirada.
+   *
+   * Texto livre, e não campos separados, de propósito: aqui quem
+   * digita é o cliente no celular, e um formulário de CEP, número e
+   * complemento faz gente desistir no meio. A loja lê e liga se ficar
+   * confuso.
+   */
+  @Prop({ type: String, default: null })
+  endereco: string | null;
+
+  @Prop({
+    type: String,
+    required: true,
+    enum: FORMAS_PAGAMENTO_PEDIDO,
+    default: 'pix',
+  })
+  formaPagamento: FormaPagamentoPedido;
+
+  /**
+   * "Preciso de troco para R$ 100" — só faz sentido em dinheiro.
+   *
+   * Sem isto a loja sai para entregar sem trocado e descobre na porta
+   * do cliente.
+   */
+  @Prop({ type: Number, default: null })
+  trocoPara: number | null;
 
   /** recado do cliente: ponto de referência, cor preferida, etc. */
   @Prop({ type: String, default: null })

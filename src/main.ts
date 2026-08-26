@@ -6,15 +6,17 @@ import { MongoExceptionFilter } from './common/mongo-exception.filter';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // O app roda no celular, em outro domínio (e no Expo, em outra porta).
-  // Sem login ainda, então não há cookie/credencial para proteger.
+  /**
+   * Três clientes, todos em outro domínio: o app no celular, o Expo em
+   * outra porta, e o catálogo publicado na Vercel/Netlify.
+   *
+   * `origin: true` reflete a origem de quem pediu, liberando todas.
+   * Não há cookie nem sessão de navegador a proteger aqui — a API ainda
+   * não tem login, o que é um assunto à parte e mais sério do que CORS.
+   */
   app.enableCors({ origin: true });
 
-  /**
-   * A vitrine fica fora do prefixo: o link vai para o WhatsApp do
-   * cliente, e /loja é bem mais fácil de ditar do que /api/publico/loja.
-   */
-  app.setGlobalPrefix('api', { exclude: ['loja'] });
+  app.setGlobalPrefix('api');
 
   // sem isso, índice único violado vira 500 sem explicação
   app.useGlobalFilters(new MongoExceptionFilter());
