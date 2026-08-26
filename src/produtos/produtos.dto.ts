@@ -2,6 +2,7 @@ import { Transform, Type } from 'class-transformer';
 import {
   IsArray,
   IsBoolean,
+  IsInt,
   IsMongoId,
   IsNumber,
   IsOptional,
@@ -56,6 +57,22 @@ export class FotoDto {
 
   @IsString()
   publicId: string;
+
+  /**
+   * A qual variação esta foto pertence, pela POSIÇÃO dela na lista
+   * `variacoes` enviada no mesmo pedido.
+   *
+   * Posição e não id porque no cadastro as variações ainda não existem
+   * no banco — não há id nenhum para referenciar. Como o formulário
+   * sempre manda a grade inteira junto, o índice vale para cadastro e
+   * edição, e o service converte para o id de verdade ao gravar.
+   *
+   * Opcional: sem vínculo, a foto é do produto como um todo.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  variacaoIndice?: number | null;
 }
 
 const vazioVirarNulo = () =>

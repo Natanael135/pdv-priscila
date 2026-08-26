@@ -10,7 +10,7 @@ import { EstoqueService } from '../estoque/estoque.service';
 import { UploadsService } from '../uploads/uploads.service';
 import { Venda } from '../vendas/venda.schema';
 import { Produto, ProdutoDocument } from './produto.schema';
-import { AtualizarProdutoDto, CriarProdutoDto } from './produtos.dto';
+import { AtualizarProdutoDto, CriarProdutoDto, FotoDto } from './produtos.dto';
 
 export interface FiltroProdutos {
   busca?: string;
@@ -114,7 +114,26 @@ export class ProdutosService {
   async criar(dto: CriarProdutoDto) {
     await this.garantirCodigoLivre(dto.codigoBarras);
 
-    const { estoqueAtual, variacoes, ...resto } = dto;
+    const { estoqueAtual, variacoes, fotos, ...resto } = dto;
+
+    /**
+     * A grade nasce com id já gerado, antes de ir para o banco.
+     *
+     * É o que permite a foto apontar para a variação no mesmo insert:
+     * se deixássemos o Mongoose gerar os ids no save, só saberíamos
+     * quais são DEPOIS de gravar, e o vínculo exigiria um segundo
+     * update.
+     */
+    const grade = (variacoes ?? []).map((v) => ({
+      _id: new Types.ObjectId(),
+      cor: v.cor ?? null,
+      tamanho: v.tamanho ?? null,
+      codigoBarras: v.codigoBarras ?? null,
+      estoqueMinimo: v.estoqueMinimo ?? 0,
+      precoVenda: v.precoVenda ?? null,
+      ativo: v.ativo ?? true,
+      estoqueAtual: 0,
+    }));
 
     /**
      * O produto nasce zerado — inclusive as variações.
@@ -127,15 +146,8 @@ export class ProdutosService {
     const produto = await this.modelo.create({
       ...resto,
       estoqueAtual: 0,
-      variacoes: (variacoes ?? []).map((v) => ({
-        cor: v.cor ?? null,
-        tamanho: v.tamanho ?? null,
-        codigoBarras: v.codigoBarras ?? null,
-        estoqueMinimo: v.estoqueMinimo ?? 0,
-        precoVenda: v.precoVenda ?? null,
-        ativo: v.ativo ?? true,
-        estoqueAtual: 0,
-      })),
+      variacoes: grade,
+      fotos: vincularFotos(fotos, grade),
     });
 
     if (variacoes?.length) {
@@ -144,11 +156,9 @@ export class ProdutosService {
         const inicial = variacoes[i].estoqueAtual ?? 0;
         if (inicial <= 0) continue;
 
-        const criada = produto.variacoes[i] as unknown as { _id: Types.ObjectId };
-
         await this.estoque.movimentar({
           produtoId: produto._id,
-          variacaoId: String(criada._id),
+          variacaoId: String(grade[i]._id),
           tipo: 'entrada',
           quantidade: inicial,
           custoUnitario: dto.precoCompra,
@@ -211,8 +221,10 @@ export class ProdutosService {
       );
 
       atualizacao.variacoes = dto.variacoes.map((v) => ({
-        // reaproveita o _id para o Mongoose entender que é a mesma linha
-        ...(v.id ? { _id: new Types.ObjectId(v.id) } : {}),
+        // reaproveita o _id de quem já existia para o Mongoose entender
+        // que é a mesma linha; quem é nova ganha o id aqui, e não no
+        // save, para as fotos poderem apontar para ela logo abaixo
+        _id: v.id ? new Types.ObjectId(v.id) : new Types.ObjectId(),
         cor: v.cor ?? null,
         tamanho: v.tamanho ?? null,
         codigoBarras: v.codigoBarras ?? null,
@@ -226,6 +238,19 @@ export class ProdutosService {
       atualizacao.estoqueAtual = (
         atualizacao.variacoes as { estoqueAtual: number }[]
       ).reduce((s, v) => s + v.estoqueAtual, 0);
+    }
+
+    /**
+     * Vínculo foto → variação, resolvido contra a grade que vai ficar
+     * gravada — a nova, quando o formulário mandou variações, e a que
+     * já estava lá quando ele mexeu só nas fotos.
+     */
+    if (dto.fotos) {
+      const grade = (atualizacao.variacoes ??
+        atual.variacoes ??
+        []) as unknown as { _id: Types.ObjectId }[];
+
+      atualizacao.fotos = vincularFotos(dto.fotos, grade);
     }
 
     await this.modelo
@@ -398,4 +423,32 @@ function arredondar(n: number) {
 
 function escapar(texto: string) {
   return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Converte o vínculo foto → variação de posição para id.
+ *
+ * O formulário fala em POSIÇÃO ("a 2ª foto é da 2ª variação") porque no
+ * cadastro as variações ainda não foram para o banco e não têm id. Aqui
+ * a posição vira o id definitivo, que é o que fica gravado.
+ *
+ * Índice que não aponta para variação nenhuma vira null em vez de erro:
+ * é o que sobra quando a variação é apagada e a foto continua na
+ * galeria. O catálogo simplesmente volta a tratá-la como foto do
+ * produto, que é o comportamento certo.
+ */
+function vincularFotos(
+  fotos: FotoDto[] | undefined,
+  grade: { _id: Types.ObjectId }[],
+) {
+  return (fotos ?? []).map((foto) => {
+    const i = foto.variacaoIndice;
+    const alvo = i === null || i === undefined ? undefined : grade[i];
+
+    return {
+      url: foto.url,
+      publicId: foto.publicId,
+      variacaoId: alvo?._id ?? null,
+    };
+  });
 }

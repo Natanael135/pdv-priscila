@@ -13,6 +13,16 @@ export class Foto {
 
   @Prop({ required: true })
   publicId: string;
+
+  /**
+   * Variação a que esta foto pertence — usado SÓ pelo catálogo em PDF,
+   * onde a variação com foto própria vira um item separado.
+   *
+   * Sem `ref`: aponta para um subdocumento do próprio produto, não
+   * para outra coleção. null = foto do produto como um todo.
+   */
+  @Prop({ type: MongooseSchema.Types.ObjectId, default: null })
+  variacaoId: Types.ObjectId | null;
 }
 
 export const FotoSchema = SchemaFactory.createForClass(Foto);
