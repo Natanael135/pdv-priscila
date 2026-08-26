@@ -7,6 +7,8 @@ export type NotificacaoDocument = HydratedDocument<Notificacao>;
 export const TIPOS_NOTIFICACAO = [
   'estoque_baixo',
   'sem_estoque',
+  /** vence hoje — lembrete, ainda não é atraso */
+  'fiado_cobrar_hoje',
   'fiado_vencido',
 ] as const;
 
@@ -31,6 +33,18 @@ export class Notificacao {
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Venda', default: null })
   venda: Types.ObjectId | null;
+
+  /**
+   * Do que este aviso trata, para não repetir.
+   *
+   * Guarda o dia (AAAA-MM-DD) nos avisos que nascem do calendário. Sem
+   * isso, o lembrete de "receber hoje" não teria como distinguir o de
+   * hoje do de ontem: o upsert reaproveitaria o aviso antigo, trocaria
+   * o texto, e como ele já constaria enviado, o push de hoje nunca
+   * sairia.
+   */
+  @Prop({ type: String, default: null })
+  referencia: string | null;
 
   @Prop({ default: false })
   lida: boolean;

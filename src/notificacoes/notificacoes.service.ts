@@ -103,6 +103,57 @@ export class NotificacoesService {
       .exec();
   }
 
+  /**
+   * Lembrete do dia: hoje é dia de receber deste cliente.
+   *
+   * Separado do aviso de atraso de propósito. São conversas diferentes
+   * — uma é lembrete ("passa lá hoje"), a outra é cobrança ("está
+   * atrasado há 5 dias") — e misturar as duas faria o lembrete parecer
+   * bronca com quem está em dia.
+   */
+  async avisarFiadoDeHoje(params: {
+    clienteId: Types.ObjectId;
+    clienteNome: string;
+    total: number;
+    dia: string;
+  }) {
+    const valor = params.total.toLocaleString('pt-BR', {
+      style: 'currency',
+      currency: 'BRL',
+    });
+
+    // lembrete de dias anteriores perdeu a validade: ou virou atraso,
+    // ou foi pago. Quem cuida do atraso é o aviso do outro tipo.
+    await this.modelo
+      .deleteMany({
+        cliente: params.clienteId,
+        tipo: 'fiado_cobrar_hoje',
+        referencia: { $ne: params.dia },
+      })
+      .exec();
+
+    await this.modelo
+      .findOneAndUpdate(
+        {
+          cliente: params.clienteId,
+          tipo: 'fiado_cobrar_hoje',
+          referencia: params.dia,
+        },
+        {
+          $set: {
+            tipo: 'fiado_cobrar_hoje',
+            titulo: 'Fiado a receber hoje',
+            mensagem:
+              `Hoje é dia de receber ${valor} de ${params.clienteNome}.`,
+            cliente: params.clienteId,
+            referencia: params.dia,
+          },
+        },
+        { upsert: true },
+      )
+      .exec();
+  }
+
   /** Cria (ou atualiza) o aviso de fiado atrasado de um cliente. */
   async avisarFiadoVencido(params: {
     clienteId: Types.ObjectId;
@@ -134,10 +185,14 @@ export class NotificacoesService {
       .exec();
   }
 
-  /** Some com o aviso quando o cliente quita o que devia. */
+  /** Some com os avisos quando o cliente quita o que devia. */
   async limparAvisoDeFiado(clienteId: Types.ObjectId) {
     await this.modelo
-      .deleteMany({ cliente: clienteId, tipo: 'fiado_vencido', lida: false })
+      .deleteMany({
+        cliente: clienteId,
+        tipo: { $in: ['fiado_vencido', 'fiado_cobrar_hoje'] },
+        lida: false,
+      })
       .exec();
   }
 }

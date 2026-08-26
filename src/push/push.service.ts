@@ -151,10 +151,40 @@ export class PushService {
 
     if (!pendentes.length) return { enviados: 0, removidos: 0, avisos: 0 };
 
-    const estoque = pendentes.filter(
+    /**
+     * Cobrança de hoje vai individual, com o nome do cliente.
+     *
+     * É acionável na hora — a pessoa lê "hoje é dia de receber da
+     * Maria" e sabe o que fazer sem abrir nada. Diluir isso num "3
+     * avisos pendentes" jogaria fora justamente a informação que faz o
+     * aviso valer. Os outros tipos continuam somados: estoque baixo é
+     * estado, não recado, e não melhora sendo repetido item a item.
+     */
+    const deHoje = pendentes.filter((n) => n.tipo === 'fiado_cobrar_hoje');
+    const resto = pendentes.filter((n) => n.tipo !== 'fiado_cobrar_hoje');
+
+    let enviados = 0;
+    let removidos = 0;
+
+    // teto para o caso raro de muitos vencendo no mesmo dia: acima
+    // disso o celular viraria uma sequência de apitos
+    const INDIVIDUAIS = 5;
+
+    for (const aviso of deHoje.slice(0, INDIVIDUAIS)) {
+      const r = await this.enviar(aviso.titulo, aviso.mensagem, {
+        tela: 'ClienteDetalhe',
+        id: aviso.cliente ? String(aviso.cliente) : undefined,
+      });
+      enviados += r.enviados;
+      removidos += r.removidos;
+    }
+
+    const excedentes = Math.max(0, deHoje.length - INDIVIDUAIS);
+
+    const estoque = resto.filter(
       (n) => n.tipo === 'estoque_baixo' || n.tipo === 'sem_estoque',
     ).length;
-    const fiado = pendentes.filter((n) => n.tipo === 'fiado_vencido').length;
+    const fiado = resto.filter((n) => n.tipo === 'fiado_vencido').length;
 
     const partes: string[] = [];
     if (estoque > 0) {
@@ -168,11 +198,23 @@ export class PushService {
       );
     }
 
-    const resultado = await this.enviar(
-      'Tem coisa para olhar',
-      partes.join(' e ') + '.',
-      { tela: 'Notificacoes' },
-    );
+    if (excedentes > 0) {
+      partes.push(
+        `mais ${excedentes} cobrança${excedentes > 1 ? 's' : ''} para hoje`,
+      );
+    }
+
+    if (partes.length) {
+      const resumo = await this.enviar(
+        'Tem coisa para olhar',
+        partes.join(' e ') + '.',
+        { tela: 'Notificacoes' },
+      );
+      enviados += resumo.enviados;
+      removidos += resumo.removidos;
+    }
+
+    const resultado = { enviados, removidos };
 
     /**
      * Marca só depois de enviar. Se a Expo estiver fora do ar, os

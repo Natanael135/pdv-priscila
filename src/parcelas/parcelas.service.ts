@@ -6,6 +6,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import dayjs from 'dayjs';
 import { Model, QueryFilter, Types } from 'mongoose';
+import { fimDoDia, hojeNaLoja, inicioDoDia } from '../common/fuso';
 import { dinheiro } from '../common/margem';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
 import { Venda } from '../vendas/venda.schema';
@@ -135,8 +136,24 @@ export class ParcelasService {
    * vence. Por isso o app chama isto ao abrir.
    */
   async sincronizarAvisos() {
+    /**
+     * A fronteira é o INÍCIO do dia da loja, não "agora".
+     *
+     * Com `vencimento < agora`, uma parcela que vence hoje — gravada
+     * à meia-noite — já aparecia como vencida às 00h01. O cliente que
+     * ainda tem o dia inteiro para pagar era tratado como caloteiro, e
+     * o lembrete de "receber hoje" nunca teria chance de existir.
+     */
+    const dia = hojeNaLoja();
+    const comecoDeHoje = inicioDoDia(dia);
+    const fimDeHoje = fimDoDia(dia);
+
     const vencidas = await this.modelo
-      .find({ pago: false, vencimento: { $lt: new Date() }, cliente: { $ne: null } })
+      .find({
+        pago: false,
+        vencimento: { $lt: comecoDeHoje },
+        cliente: { $ne: null },
+      })
       .exec();
 
     // um aviso por cliente, não um por parcela — senão vira spam
@@ -169,7 +186,41 @@ export class ParcelasService {
       });
     }
 
-    return { avisos: porCliente.size };
+    // ── vence HOJE: lembrete, não cobrança ──────────────────────────
+    const deHoje = await this.modelo
+      .find({
+        pago: false,
+        vencimento: { $gte: comecoDeHoje, $lte: fimDeHoje },
+        cliente: { $ne: null },
+      })
+      .exec();
+
+    const hojePorCliente = new Map<
+      string,
+      { id: Types.ObjectId; nome: string; total: number }
+    >();
+
+    for (const p of deHoje) {
+      const chave = String(p.cliente);
+      const atual = hojePorCliente.get(chave);
+
+      hojePorCliente.set(chave, {
+        id: p.cliente!,
+        nome: atual?.nome ?? p.clienteNome ?? 'Cliente',
+        total: (atual?.total ?? 0) + (p.valor - p.valorPago),
+      });
+    }
+
+    for (const info of hojePorCliente.values()) {
+      await this.notificacoes.avisarFiadoDeHoje({
+        clienteId: info.id,
+        clienteNome: info.nome,
+        total: dinheiro(info.total),
+        dia,
+      });
+    }
+
+    return { avisos: porCliente.size, aReceberHoje: hojePorCliente.size };
   }
 
   /** Quitou tudo? A venda deixa de ser fiado. */
