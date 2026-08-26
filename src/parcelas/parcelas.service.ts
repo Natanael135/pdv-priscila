@@ -73,6 +73,19 @@ export class ParcelasService {
     // um centavo de folga: parcela arredondada nunca fecha exato
     parcela.pago = parcela.valorPago >= parcela.valor - 0.01;
     parcela.pagoEm = parcela.pago ? new Date() : null;
+
+    // registra a entrada: valorPago guarda o total, não quando cada
+    // pedaço entrou — e é isso que a pessoa quer ver ao conferir
+    parcela.historico.push({
+      tipo: 'recebimento',
+      em: new Date(),
+      vencimentoAnterior: null,
+      vencimentoNovo: null,
+      valor: recebido,
+      saldoDepois: dinheiro(parcela.valor - parcela.valorPago),
+      observacao: null,
+    });
+
     await parcela.save();
 
     await this.atualizarSituacaoDaVenda(parcela.venda);
@@ -82,13 +95,38 @@ export class ParcelasService {
     return parcela;
   }
 
-  /** Renegociação: empurra o vencimento. */
-  async alterarVencimento(id: string, vencimento: string) {
-    const parcela = await this.modelo
-      .findByIdAndUpdate(id, { vencimento: dayjs(vencimento).toDate() }, { returnDocument: 'after' })
-      .exec();
+  /**
+   * Renegociação: empurra o vencimento, guardando o combinado anterior.
+   *
+   * Carrega e salva em vez de um update direto de propósito: para
+   * registrar de onde a data saiu, é preciso lê-la antes de trocar.
+   */
+  async alterarVencimento(id: string, vencimento: string, motivo?: string) {
+    const parcela = await this.obter(id);
 
-    if (!parcela) throw new NotFoundException('Parcela não encontrada');
+    if (parcela.pago) {
+      throw new BadRequestException('Esta parcela já foi recebida');
+    }
+
+    const anterior = parcela.vencimento;
+    const nova = dayjs(vencimento).toDate();
+
+    // parcela antiga, de antes do histórico existir: adota o vencimento
+    // atual como o original, senão ela apareceria como "sem original"
+    if (!parcela.vencimentoOriginal) parcela.vencimentoOriginal = anterior;
+
+    parcela.vencimento = nova;
+    parcela.historico.push({
+      tipo: 'adiada',
+      em: new Date(),
+      vencimentoAnterior: anterior,
+      vencimentoNovo: nova,
+      valor: null,
+      saldoDepois: null,
+      observacao: motivo?.trim() || null,
+    });
+
+    await parcela.save();
 
     if (parcela.cliente) await this.revisarAvisoDeFiado(parcela.cliente);
     return parcela;

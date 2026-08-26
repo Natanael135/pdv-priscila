@@ -305,6 +305,10 @@ export class VendasService {
       const resto = dinheiro(pagamento.valor - valorParcela * parcelas);
 
       for (let i = 1; i <= parcelas; i++) {
+        const vence = ehFiado
+          ? primeiroVencimento.add(i - 1, 'month').toDate()
+          : dayjs().add(i, 'month').toDate();
+
         novas.push({
           venda: venda._id,
           vendaNumero: venda.numero,
@@ -315,9 +319,9 @@ export class VendasService {
           numero: i,
           totalParcelas: parcelas,
           valor: i === parcelas ? dinheiro(valorParcela + resto) : valorParcela,
-          vencimento: ehFiado
-            ? primeiroVencimento.add(i - 1, 'month').toDate()
-            : dayjs().add(i, 'month').toDate(),
+          vencimento: vence,
+          vencimentoOriginal: vence,
+          historico: [{ tipo: 'criada', em: new Date(), vencimentoNovo: vence }],
         });
       }
     }

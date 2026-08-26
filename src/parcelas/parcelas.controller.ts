@@ -9,7 +9,14 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { IsDateString, IsNumber, IsOptional, IsPositive } from 'class-validator';
+import {
+  IsDateString,
+  IsNumber,
+  IsOptional,
+  IsPositive,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { ParcelasService } from './parcelas.service';
 
 class ReceberParcelaDto {
@@ -23,6 +30,12 @@ class ReceberParcelaDto {
 class AlterarVencimentoDto {
   @IsDateString({}, { message: 'Data de vencimento inválida' })
   vencimento: string;
+
+  /** o combinado, em texto: "cliente pediu para deixar para o dia 10" */
+  @IsOptional()
+  @IsString()
+  @MaxLength(140)
+  motivo?: string;
 }
 
 @Controller('parcelas')
@@ -65,7 +78,7 @@ export class ParcelasController {
 
   @Patch(':id/vencimento')
   alterarVencimento(@Param('id') id: string, @Body() dto: AlterarVencimentoDto) {
-    return this.service.alterarVencimento(id, dto.vencimento);
+    return this.service.alterarVencimento(id, dto.vencimento, dto.motivo);
   }
 
   @Delete(':id')
