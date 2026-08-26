@@ -34,11 +34,25 @@ export class Notificacao {
 
   @Prop({ default: false })
   lida: boolean;
+
+  /**
+   * Já entrou num push enviado ao celular.
+   *
+   * Separado de `lida`: `lida` é a pessoa ter visto na tela do app,
+   * `avisado` é o aparelho ter apitado. Sem os dois, ou o aviso sairia
+   * de novo a cada disparo, ou abrir o app mataria um push que ainda
+   * nem tinha saído.
+   */
+  @Prop({ default: false })
+  avisado: boolean;
 }
 
 export const NotificacaoSchema = SchemaFactory.createForClass(Notificacao);
 
 NotificacaoSchema.index({ lida: 1, criadoEm: -1 });
+
+// o disparo do push varre exatamente por estes dois campos
+NotificacaoSchema.index({ lida: 1, avisado: 1 });
 
 /**
  * Um aviso pendente por produto e por tipo. Sem isso, cada venda de um
