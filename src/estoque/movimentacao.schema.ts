@@ -56,6 +56,17 @@ export class Movimentacao {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Venda', default: null })
   venda: Types.ObjectId | null;
 
+  /**
+   * Fornecedor daquela remessa — só faz sentido em entrada.
+   *
+   * Fica na movimentação, e não só no produto, porque o produto pode
+   * trocar de fornecedor: gravar aqui preserva de quem veio CADA
+   * compra, que é o que permite comparar preço entre fornecedores ao
+   * longo do tempo.
+   */
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Fornecedor', default: null })
+  fornecedor: Types.ObjectId | null;
+
   @Prop({ type: String, default: null })
   motivo: string | null;
 }

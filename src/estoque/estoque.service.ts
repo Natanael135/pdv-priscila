@@ -28,6 +28,8 @@ export interface EntradaMovimentacao {
   custoUnitario?: number | null;
   motivo?: string | null;
   vendaId?: Types.ObjectId | null;
+  /** fornecedor da remessa; só usado em entrada */
+  fornecedorId?: string | Types.ObjectId | null;
 }
 
 @Injectable()
@@ -118,6 +120,13 @@ export class EstoqueService {
           estoqueNovo: variacao ? variacao.estoqueAtual : produto.estoqueAtual,
           custoUnitario: entrada.custoUnitario ?? produto.precoCompra,
           venda: entrada.vendaId ?? null,
+          /**
+           * Só na entrada. Numa saída ou venda o campo não teria
+           * sentido — a peça não voltou para o fornecedor —, e gravá-lo
+           * ali sujaria o cálculo de quanto foi comprado de cada um.
+           */
+          fornecedor:
+            entrada.tipo === 'entrada' ? (entrada.fornecedorId ?? null) : null,
           motivo: entrada.motivo ?? null,
         },
       ],

@@ -8,6 +8,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
 import { EstoqueModule } from './estoque/estoque.module';
 import { HealthController } from './health/health.controller';
 import { NotificacoesModule } from './notificacoes/notificacoes.module';
+import { FornecedoresModule } from './fornecedores/fornecedores.module';
 import { GastosModule } from './gastos/gastos.module';
 import { PedidosModule } from './pedidos/pedidos.module';
 import { PublicoModule } from './publico/publico.module';
@@ -54,6 +55,7 @@ import { VendasModule } from './vendas/vendas.module';
     PushModule,
     PedidosModule,
     GastosModule,
+    FornecedoresModule,
     PublicoModule,
     ConfiguracoesModule,
     UploadsModule,

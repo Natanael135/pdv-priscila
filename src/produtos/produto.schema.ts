@@ -85,6 +85,16 @@ export class Produto {
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Categoria', default: null })
   categoria: Types.ObjectId | null;
 
+  /**
+   * De quem se compra este produto.
+   *
+   * Opcional: nem toda peça vem de fornecedor fixo. Quando existe, é o
+   * que responde "acabou o lençol casal, ligo para quem?" sem abrir a
+   * agenda e tentar lembrar.
+   */
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Fornecedor', default: null })
+  fornecedor: Types.ObjectId | null;
+
   /** único quando existe; a maioria dos produtos fica sem (ver índice abaixo) */
   @Prop({ type: String, default: null })
   codigoBarras: string | null;
@@ -190,6 +200,7 @@ export function somarVariacoes(variacoes: Variacao[] | undefined): number {
 
 ProdutoSchema.index({ nome: 'text' });
 ProdutoSchema.index({ categoria: 1, ativo: 1 });
+ProdutoSchema.index({ fornecedor: 1, ativo: 1 });
 ProdutoSchema.index({ margemPercentual: -1 });
 
 /**

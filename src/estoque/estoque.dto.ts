@@ -1,4 +1,11 @@
-import { IsEnum, IsNumber, IsOptional, IsString, Min } from 'class-validator';
+import {
+  IsEnum,
+  IsMongoId,
+  IsNumber,
+  IsOptional,
+  IsString,
+  Min,
+} from 'class-validator';
 import { TIPOS_MOVIMENTACAO } from './movimentacao.schema';
 import type { TipoMovimentacao } from './movimentacao.schema';
 
@@ -25,4 +32,9 @@ export class MovimentarEstoqueDto {
   @IsOptional()
   @IsString()
   variacao?: string;
+
+  /** de quem veio esta remessa — só faz sentido em entrada */
+  @IsOptional()
+  @IsMongoId({ message: 'Fornecedor inválido' })
+  fornecedor?: string;
 }

@@ -75,6 +75,7 @@ export class ProdutosService {
       .find(query)
       .sort({ nome: 1 })
       .populate('categoria', 'nome cor icone')
+      .populate('fornecedor', 'nome telefone contato prazoEntregaDias')
       .exec();
 
     return produtos.map((p) => comSituacao(p));
@@ -84,6 +85,7 @@ export class ProdutosService {
     const produto = await this.modelo
       .findById(id)
       .populate('categoria', 'nome cor icone')
+      .populate('fornecedor', 'nome telefone contato prazoEntregaDias')
       .exec();
 
     if (!produto) throw new NotFoundException('Produto não encontrado');
@@ -103,6 +105,7 @@ export class ProdutosService {
         $or: [{ codigoBarras: codigo }, { 'variacoes.codigoBarras': codigo }],
       })
       .populate('categoria', 'nome cor icone')
+      .populate('fornecedor', 'nome telefone contato prazoEntregaDias')
       .exec();
 
     if (!produto) {
@@ -364,6 +367,7 @@ export class ProdutosService {
     const produtos = await this.modelo
       .find({ ativo: true })
       .populate('categoria', 'nome cor icone')
+      .populate('fornecedor', 'nome telefone contato prazoEntregaDias')
       .exec();
 
     const linhas = produtos.map((p) => {

@@ -41,6 +41,7 @@ export class EstoqueController {
       quantidade: dto.quantidade,
       custoUnitario: dto.custoUnitario ?? null,
       motivo: dto.motivo ?? null,
+      fornecedorId: dto.fornecedor ?? null,
     });
   }
 }

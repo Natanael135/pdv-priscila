@@ -98,6 +98,11 @@ export class CriarProdutoDto {
 
   @IsOptional()
   @vazioVirarNulo()
+  @IsMongoId({ message: 'Fornecedor inválido' })
+  fornecedor?: string | null;
+
+  @IsOptional()
+  @vazioVirarNulo()
   @IsString()
   codigoBarras?: string | null;
 
@@ -156,6 +161,11 @@ export class AtualizarProdutoDto {
   @vazioVirarNulo()
   @IsMongoId()
   categoria?: string | null;
+
+  @IsOptional()
+  @vazioVirarNulo()
+  @IsMongoId({ message: 'Fornecedor inválido' })
+  fornecedor?: string | null;
 
   @IsOptional()
   @vazioVirarNulo()
