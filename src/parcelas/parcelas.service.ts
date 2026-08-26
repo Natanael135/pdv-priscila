@@ -132,6 +132,106 @@ export class ParcelasService {
     return parcela;
   }
 
+  /**
+   * Como este cliente costuma pagar.
+   *
+   * Responde a pergunta que a loja faz antes de liberar fiado de novo:
+   * "essa pessoa honra o combinado?". Os números vêm do que já
+   * aconteceu — quantas quitou no prazo, quantas vezes pediu para
+   * adiar, quanto costuma atrasar — em vez de uma impressão.
+   *
+   * Conta só o que está FECHADO no cálculo de pontualidade: parcela em
+   * aberto e ainda no prazo não é mérito nem demérito, e incluí-la
+   * inflaria a reputação de quem acabou de comprar.
+   */
+  async comportamentoDoCliente(clienteId: string) {
+    const parcelas = await this.modelo
+      .find({ cliente: new Types.ObjectId(clienteId) })
+      .sort({ vencimento: 1 })
+      .exec();
+
+    const quitadas = parcelas.filter((p) => p.pago);
+    const abertas = parcelas.filter((p) => !p.pago);
+
+    let noPrazo = 0;
+    let comAtraso = 0;
+    let somaAtraso = 0;
+    let maiorAtraso = 0;
+
+    for (const p of quitadas) {
+      if (!p.pagoEm) continue;
+
+      /**
+       * A comparação é por DIA, não por instante: quem paga às 18h do
+       * dia do vencimento pagou em dia. Comparando timestamps, o
+       * vencimento gravado à meia-noite faria todo pagamento do próprio
+       * dia contar como atraso.
+       */
+      const atraso = Math.floor(
+        (inicioDoDia(p.pagoEm).getTime() - inicioDoDia(p.vencimento).getTime()) /
+          86400000,
+      );
+
+      if (atraso > 0) {
+        comAtraso++;
+        somaAtraso += atraso;
+        maiorAtraso = Math.max(maiorAtraso, atraso);
+      } else {
+        noPrazo++;
+      }
+    }
+
+    const adiamentos = parcelas.reduce(
+      (s, p) => s + (p.historico ?? []).filter((e) => e.tipo === 'adiada').length,
+      0,
+    );
+
+    // parcela que precisou de mais de uma entrada para fechar
+    const pagasEmPedacos = parcelas.filter(
+      (p) => (p.historico ?? []).filter((e) => e.tipo === 'recebimento').length > 1,
+    ).length;
+
+    const hoje = inicioDoDia(hojeNaLoja());
+    const vencidasAgora = abertas.filter((p) => p.vencimento < hoje);
+
+    /**
+     * Linha do tempo de tudo que aconteceu, do mais recente para trás.
+     * Sem limite aqui de propósito: quem consulta isso quer o retrato
+     * inteiro, e são poucas dezenas de eventos por cliente.
+     */
+    const eventos = parcelas
+      .flatMap((p) =>
+        (p.historico ?? []).map((e) => ({
+          tipo: e.tipo,
+          em: e.em,
+          vencimentoAnterior: e.vencimentoAnterior,
+          vencimentoNovo: e.vencimentoNovo,
+          valor: e.valor,
+          saldoDepois: e.saldoDepois,
+          observacao: e.observacao,
+          vendaNumero: p.vendaNumero,
+          parcela: p.numero,
+          totalParcelas: p.totalParcelas,
+        })),
+      )
+      .sort((a, b) => b.em.getTime() - a.em.getTime());
+
+    return {
+      totalParcelas: parcelas.length,
+      quitadas: quitadas.length,
+      noPrazo,
+      comAtraso,
+      atrasoMedio: comAtraso ? Math.round(somaAtraso / comAtraso) : 0,
+      maiorAtraso,
+      adiamentos,
+      pagasEmPedacos,
+      abertas: abertas.length,
+      vencidasAgora: vencidasAgora.length,
+      deve: dinheiro(abertas.reduce((s, p) => s + (p.valor - p.valorPago), 0)),
+      eventos,
+    };
+  }
+
   /** Perdoar a dívida / cancelar a cobrança. */
   async excluir(id: string) {
     const parcela = await this.obter(id);

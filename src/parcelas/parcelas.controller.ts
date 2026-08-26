@@ -66,6 +66,15 @@ export class ParcelasController {
     return this.service.sincronizarAvisos();
   }
 
+  /**
+   * Vem ANTES de ':id' de propósito: o Nest casa as rotas na ordem em
+   * que são declaradas, e 'cliente' seria engolido como um id.
+   */
+  @Get('cliente/:clienteId/comportamento')
+  comportamento(@Param('clienteId') clienteId: string) {
+    return this.service.comportamentoDoCliente(clienteId);
+  }
+
   @Get(':id')
   obter(@Param('id') id: string) {
     return this.service.obter(id);
