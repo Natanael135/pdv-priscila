@@ -64,6 +64,24 @@ export class PushService {
    * aparelhos que não existem mais.
    */
   async enviar(titulo: string, mensagem: string, dados?: Record<string, unknown>) {
+    /**
+     * Trava para rodar a API localmente sem incomodar ninguém.
+     *
+     * O banco é o mesmo em desenvolvimento e em produção, e os tokens
+     * cadastrados são de celulares REAIS. Sem isto, um teste que cria
+     * um pedido faz o telefone da loja apitar com um cliente fictício
+     * — foi exatamente o que aconteceu.
+     *
+     * Fica desligada por padrão: no servidor a variável não existe, e
+     * o push sai normalmente.
+     */
+    if (process.env.PUSH_DESATIVADO === '1') {
+      this.logger.log(
+        `Push desativado (PUSH_DESATIVADO=1) — não enviei: "${titulo}"`,
+      );
+      return { enviados: 0, removidos: 0 };
+    }
+
     const aparelhos = await this.dispositivos.find().lean().exec();
     if (!aparelhos.length) return { enviados: 0, removidos: 0 };
 
