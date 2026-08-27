@@ -11,7 +11,7 @@ export type TabelaDePreco = (typeof TABELAS_DE_PRECO)[number];
 
 export const ROTULO_DA_TABELA: Record<TabelaDePreco, string> = {
   avista: 'à vista',
-  credito: 'crédito',
+  credito: 'cartão',
   fiado: 'fiado',
 };
 
@@ -25,11 +25,16 @@ export interface PrecosDoItem {
 /**
  * A qual tabela cada forma de pagamento pertence.
  *
- * Débito, pix, dinheiro e transferência caem o mesmo dia na conta: são
- * à vista. Crédito e fiado têm cada um a sua.
+ * Crédito e DÉBITO caem os dois na tabela de cartão: a maquininha cobra
+ * a taxa nas duas, então o preço é o mesmo. A tabela se chama 'credito'
+ * por dentro porque é o nome que já está gravado no banco, mas o que
+ * ela cobre é o cartão inteiro.
+ *
+ * Pix, dinheiro e transferência caem na conta no mesmo dia, sem taxa
+ * nenhuma: são à vista. Fiado tem a dele, que paga o risco e a espera.
  */
 export function tabelaDaForma(forma: FormaPagamento): TabelaDePreco {
-  if (forma === 'credito') return 'credito';
+  if (forma === 'credito' || forma === 'debito') return 'credito';
   if (forma === 'fiado') return 'fiado';
   return 'avista';
 }
