@@ -7,6 +7,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, QueryFilter, Types } from 'mongoose';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
 import { VendasService } from '../vendas/vendas.service';
+import type { FormaPagamento } from '../vendas/venda.schema';
 import {
   Pedido,
   PedidoDocument,
@@ -125,7 +126,18 @@ export class PedidosService {
   async concluir(
     id: string,
     dados: {
-      pagamentos: { forma: string; valor: number; parcelas?: number }[];
+      /**
+       * A forma é a lista fechada da VENDA, não texto livre.
+       *
+       * Estava como `string` e o `as never` na chamada escondia a
+       * diferença — o compilador só voltou a enxergar quando o cast
+       * saiu. Um "pix " com espaço passaria batido até o Mongo recusar.
+       */
+      pagamentos: {
+        forma: FormaPagamento;
+        valor: number;
+        parcelas?: number;
+      }[];
       desconto?: number;
       vencimentoFiado?: string;
     },

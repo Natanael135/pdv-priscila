@@ -42,8 +42,15 @@ class MotivoDto {
 }
 
 class PagamentoDoPedidoDto {
-  @IsString()
-  forma: string;
+  /**
+   * Lista fechada, não texto livre.
+   *
+   * Aceitando string, "pix " com espaço chegava até o Mongo para ser
+   * recusado lá — com uma mensagem que não ajuda quem está fechando a
+   * venda com o cliente na frente.
+   */
+  @IsIn(FORMAS_PAGAMENTO, { message: 'Forma de pagamento inválida' })
+  forma: FormaPagamento;
 
   @IsNumber()
   @Min(0)
