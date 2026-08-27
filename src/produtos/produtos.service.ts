@@ -242,10 +242,24 @@ export class ProdutosService {
           : (v.estoqueAtual ?? 0),
       }));
 
-      // o saldo do produto acompanha a soma da grade
-      atualizacao.estoqueAtual = (
-        atualizacao.variacoes as { estoqueAtual: number }[]
-      ).reduce((s, v) => s + v.estoqueAtual, 0);
+      /*
+       * O saldo do produto acompanha a soma da grade — mas SÓ quando há
+       * grade.
+       *
+       * O formulário manda `variacoes: []` em toda edição, inclusive de
+       * produto simples, que nunca teve grade nenhuma. Somar uma lista
+       * vazia dá zero, então corrigir um preço zerava o estoque: sem
+       * erro na tela, sem movimentação no histórico, a peça só sumia do
+       * saldo.
+       *
+       * Grade esvaziada de propósito também não zera. Tirar as
+       * variações não faz as peças deixarem de existir na prateleira —
+       * o saldo que estava lá continua sendo o saldo do produto.
+       */
+      const grade = atualizacao.variacoes as { estoqueAtual: number }[];
+      if (grade.length > 0) {
+        atualizacao.estoqueAtual = grade.reduce((s, v) => s + v.estoqueAtual, 0);
+      }
     }
 
     /**
