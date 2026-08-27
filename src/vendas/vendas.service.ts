@@ -8,7 +8,7 @@ import dayjs from 'dayjs';
 import { ClientSession, Connection, Model, QueryFilter, Types } from 'mongoose';
 import { Cliente, ClienteDocument } from '../clientes/cliente.schema';
 import { ContadorService } from '../common/contador.service';
-import { fimDoDia, inicioDoDia } from '../common/fuso';
+import { fimDoDia, hojeNaLoja, inicioDoDia } from '../common/fuso';
 import { custoDoItem, precoDaTabela } from '../common/precos';
 import type { TabelaDePreco } from '../common/precos';
 import { dinheiro, moeda } from '../common/margem';
@@ -317,9 +317,16 @@ export class VendasService {
     const config = await this.configuracoes.findOne().session(session).exec();
     const diasPadrao = config?.diasFiadoPadrao ?? 30;
 
-    const primeiroVencimento = dto.vencimentoFiado
-      ? dayjs(dto.vencimentoFiado)
-      : dayjs().add(diasPadrao, 'day');
+    /*
+     * A data escolhida vale no fuso da LOJA.
+     *
+     * Sem inicioDoDia, "2026-12-31" virava 00:00 no relógio do servidor
+     * — que no Render é UTC. Exibido em São Paulo isso recua três horas
+     * e cai no dia 30: a pessoa marcava 31 e o app mostrava 30.
+     */
+    const primeiroVencimento = dayjs(
+      inicioDoDia(dto.vencimentoFiado ?? dayjs().add(diasPadrao, 'day').toDate()),
+    );
 
     const novas: Record<string, unknown>[] = [];
 
@@ -336,9 +343,14 @@ export class VendasService {
       const resto = dinheiro(pagamento.valor - valorParcela * parcelas);
 
       for (let i = 1; i <= parcelas; i++) {
+        /*
+         * O cartão parcelado também nasce à meia-noite da loja: com a
+         * hora da venda embutida, uma parcela só ficaria "vencida" no
+         * meio da tarde do dia do vencimento.
+         */
         const vence = ehFiado
           ? primeiroVencimento.add(i - 1, 'month').toDate()
-          : dayjs().add(i, 'month').toDate();
+          : dayjs(inicioDoDia(hojeNaLoja())).add(i, 'month').toDate();
 
         novas.push({
           venda: venda._id,

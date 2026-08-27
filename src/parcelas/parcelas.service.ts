@@ -109,7 +109,8 @@ export class ParcelasService {
     }
 
     const anterior = parcela.vencimento;
-    const nova = dayjs(vencimento).toDate();
+    // mesma regra do vencimento original: o dia é o do fuso da loja
+    const nova = inicioDoDia(vencimento);
 
     // parcela antiga, de antes do histórico existir: adota o vencimento
     // atual como o original, senão ela apareceria como "sem original"
