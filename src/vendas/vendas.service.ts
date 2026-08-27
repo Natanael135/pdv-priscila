@@ -30,6 +30,18 @@ export interface FiltroVendas {
   limite?: number;
 }
 
+/**
+ * Campos que só o fluxo INTERNO preenche.
+ *
+ * Não entram no DTO da requisição de propósito: quem vende pelo balcão
+ * não escolhe a própria procedência, e aceitar isso do corpo deixaria
+ * qualquer um marcar uma venda como vinda do catálogo.
+ */
+interface DadosInternosDaVenda {
+  origem?: OrigemVenda;
+  pedidoId?: Types.ObjectId | null;
+}
+
 @Injectable()
 export class VendasService {
   constructor(
@@ -56,7 +68,7 @@ export class VendasService {
    * Requer replica set — o Atlas já é. Num mongod standalone local o
    * driver recusa a transação, e a mensagem de erro diz isso.
    */
-  async registrar(dto: RegistrarVendaDto) {
+  async registrar(dto: RegistrarVendaDto & DadosInternosDaVenda) {
     const session = await this.conexao.startSession();
 
     try {
@@ -73,7 +85,7 @@ export class VendasService {
   }
 
   private async gravarVenda(
-    dto: RegistrarVendaDto,
+    dto: RegistrarVendaDto & DadosInternosDaVenda,
     session: ClientSession,
   ): Promise<Types.ObjectId> {
     // ── Itens ──────────────────────────────────────────────────────
@@ -251,6 +263,12 @@ export class VendasService {
           custoTotal,
           lucro: dinheiro(total - custoTotal),
           situacao,
+          /**
+           * Procedência. Só o fluxo de pedido manda 'catalogo'; a venda
+           * de balcão nem informa, e o padrão do schema resolve.
+           */
+          origem: dto.origem ?? 'balcao',
+          pedido: dto.pedidoId ?? null,
           observacao: dto.observacao ?? null,
         },
       ],

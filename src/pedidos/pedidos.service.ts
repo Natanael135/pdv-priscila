@@ -153,8 +153,8 @@ export class PedidosService {
       observacao: `Pedido #${pedido.numero} do catálogo online`,
       // carimba a procedência: é por aqui que a tela de vendas filtra
       origem: 'catalogo',
-      pedido: pedido._id,
-    } as never);
+      pedidoId: pedido._id,
+    });
 
     pedido.status = 'concluido';
     pedido.venda = new Types.ObjectId(String((venda as { id?: string }).id));
