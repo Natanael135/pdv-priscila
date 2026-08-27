@@ -8,6 +8,8 @@ import dayjs from 'dayjs';
 import { Model, QueryFilter, Types } from 'mongoose';
 import { fimDoDia, hojeNaLoja, inicioDoDia } from '../common/fuso';
 import { dinheiro } from '../common/margem';
+import { Produto } from '../produtos/produto.schema';
+import { Venda } from '../vendas/venda.schema';
 import {
   CategoriaGasto,
   Gasto,
@@ -34,6 +36,8 @@ export class GastosService {
     @InjectModel(Gasto.name) private readonly modelo: Model<GastoDocument>,
     @InjectModel(GastoRecorrente.name)
     private readonly recorrentes: Model<GastoRecorrenteDocument>,
+    @InjectModel(Venda.name) private readonly vendas: Model<Venda>,
+    @InjectModel(Produto.name) private readonly produtos: Model<Produto>,
   ) {}
 
   // ─── Lançamentos ────────────────────────────────────────────────
@@ -266,6 +270,167 @@ export class GastosService {
       .exec();
 
     return dinheiro(r?.total ?? 0);
+  }
+
+  /**
+   * Quantas peças a loja precisa vender no mês para se pagar.
+   *
+   * A conta é a do ponto de equilíbrio: cada peça vendida deixa uma
+   * sobra (venda menos o custo dela), e essa sobra é o que paga o
+   * aluguel, a luz e o resto. Dividindo a despesa fixa pela sobra
+   * média, sai o número de peças.
+   *
+   * A margem média vem das VENDAS REAIS dos últimos 90 dias, não do
+   * cadastro: o que pesa é o que de fato sai da loja, com os descontos
+   * que foram dados. Sem venda nenhuma no período, cai no cadastro e
+   * diz que é estimativa — um número inventado sem aviso seria pior do
+   * que nenhum número.
+   */
+  async pontoDeEquilibrio() {
+    const dia = hojeNaLoja();
+    const inicioDoMes = inicioDoDia(dia.slice(0, 7) + '-01');
+    const fimDeHoje = fimDoDia(dia);
+
+    // ── quanto custa manter a loja aberta ──────────────────────────
+    const moldes = await this.recorrentes.find({ ativo: true }).lean().exec();
+    const fixoMensal = dinheiro(moldes.reduce((s, m) => s + m.valor, 0));
+
+    /**
+     * Gastos avulsos do mês entram também: frete, conserto e imposto
+     * não são fixos, mas saem do mesmo bolso. Ignorá-los faria a meta
+     * parecer menor do que é.
+     */
+    const [avulsos] = await this.modelo
+      .aggregate<{ total: number }>([
+        {
+          $match: {
+            data: { $gte: inicioDoMes, $lte: fimDeHoje },
+            recorrente: null,
+          },
+        },
+        { $group: { _id: null, total: { $sum: '$valor' } } },
+      ])
+      .exec();
+
+    const variavelDoMes = dinheiro(avulsos?.total ?? 0);
+    const precisaCobrir = dinheiro(fixoMensal + variavelDoMes);
+
+    // ── quanto cada peça deixa de sobra ────────────────────────────
+    const noventaDias = new Date(Date.now() - 90 * 86400000);
+
+    const [vendido] = await this.vendas
+      .aggregate<{ pecas: number; receita: number; custo: number }>([
+        { $match: { status: 'concluida', criadoEm: { $gte: noventaDias } } },
+        { $unwind: '$itens' },
+        {
+          $group: {
+            _id: null,
+            pecas: { $sum: '$itens.quantidade' },
+            receita: { $sum: '$itens.total' },
+            custo: {
+              $sum: { $multiply: ['$itens.custoUnitario', '$itens.quantidade'] },
+            },
+          },
+        },
+      ])
+      .exec();
+
+    let margemPorPeca = 0;
+    let estimado = false;
+
+    if (vendido && vendido.pecas > 0) {
+      margemPorPeca = dinheiro((vendido.receita - vendido.custo) / vendido.pecas);
+    } else {
+      // sem histórico: usa o cadastro, e avisa que é estimativa
+      const [doCatalogo] = await this.produtos
+        .aggregate<{ media: number }>([
+          { $match: { ativo: true, precoVenda: { $gt: 0 } } },
+          {
+            $group: {
+              _id: null,
+              media: { $avg: { $subtract: ['$precoVenda', '$precoCompra'] } },
+            },
+          },
+        ])
+        .exec();
+
+      margemPorPeca = dinheiro(doCatalogo?.media ?? 0);
+      estimado = true;
+    }
+
+    // ── quanto já foi feito neste mês ──────────────────────────────
+    const [doMes] = await this.vendas
+      .aggregate<{ pecas: number; lucro: number }>([
+        {
+          $match: {
+            status: 'concluida',
+            criadoEm: { $gte: inicioDoMes, $lte: fimDeHoje },
+          },
+        },
+        {
+          $facet: {
+            itens: [
+              { $unwind: '$itens' },
+              { $group: { _id: null, pecas: { $sum: '$itens.quantidade' } } },
+            ],
+            totais: [{ $group: { _id: null, lucro: { $sum: '$lucro' } } }],
+          },
+        },
+        {
+          $project: {
+            pecas: { $ifNull: [{ $first: '$itens.pecas' }, 0] },
+            lucro: { $ifNull: [{ $first: '$totais.lucro' }, 0] },
+          },
+        },
+      ])
+      .exec();
+
+    const pecasVendidas = doMes?.pecas ?? 0;
+    const lucroDoMes = dinheiro(doMes?.lucro ?? 0);
+
+    /**
+     * Sem margem não há conta possível — dividir por zero daria
+     * Infinity, e "venda ∞ peças" não ajuda ninguém. Devolve null e a
+     * tela explica o que falta cadastrar.
+     */
+    const pecasNecessarias =
+      margemPorPeca > 0 ? Math.ceil(precisaCobrir / margemPorPeca) : null;
+
+    const faltam =
+      pecasNecessarias !== null
+        ? Math.max(0, pecasNecessarias - pecasVendidas)
+        : null;
+
+    return {
+      fixoMensal,
+      variavelDoMes,
+      precisaCobrir,
+
+      margemPorPeca,
+      /** true = calculada do cadastro, por falta de vendas no período */
+      estimado,
+
+      pecasNecessarias,
+      pecasVendidas,
+      faltam,
+
+      lucroDoMes,
+      /** já pagou as contas do mês? */
+      noAzul: lucroDoMes >= precisaCobrir,
+      /** quanto falta de lucro para cobrir os gastos */
+      faltaEmDinheiro: dinheiro(Math.max(0, precisaCobrir - lucroDoMes)),
+
+      /** por dia útil restante, para a meta virar rotina */
+      diasRestantes: (() => {
+        const hoje = Number(dia.slice(8, 10));
+        const ultimo = new Date(
+          Number(dia.slice(0, 4)),
+          Number(dia.slice(5, 7)),
+          0,
+        ).getDate();
+        return Math.max(1, ultimo - hoje + 1);
+      })(),
+    };
   }
 
   /** Contas vencidas e não pagas — para o aviso na tela. */

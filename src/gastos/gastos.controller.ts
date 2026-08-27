@@ -68,6 +68,12 @@ export class GastosController {
     return this.service.resumo(de ?? hoje.slice(0, 7) + '-01', ate ?? hoje);
   }
 
+  /** Quantas peças precisam sair no mês para a loja se pagar. */
+  @Get('ponto-equilibrio')
+  pontoDeEquilibrio() {
+    return this.service.pontoDeEquilibrio();
+  }
+
   @Get('vencidos')
   vencidos() {
     return this.service.vencidos();
