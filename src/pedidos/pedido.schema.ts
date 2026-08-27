@@ -23,15 +23,38 @@ export const FORMAS_PAGAMENTO_PEDIDO = [
 
 export type FormaPagamentoPedido = (typeof FORMAS_PAGAMENTO_PEDIDO)[number];
 
+/**
+ * A vida de um pedido, na ordem em que acontece.
+ *
+ * Os estados do meio existem para o cliente: sem eles, o pedido some
+ * entre "aceito" e "concluído" e a pessoa fica sem saber se a loja
+ * esqueceu. "Saiu para entrega" e "pronto para retirada" são o mesmo
+ * degrau — qual deles vale depende de como o pedido foi feito.
+ */
 export const STATUS_PEDIDO = [
   'novo',
   'aceito',
-  'recusado',
+  'preparando',
+  'saiu_entrega',
+  'pronto_retirada',
   'concluido',
+  'recusado',
   'cancelado',
 ] as const;
 
 export type StatusPedido = (typeof STATUS_PEDIDO)[number];
+
+/** Como cada estado é dito em português — usado em mensagem de erro. */
+export const ROTULO_STATUS: Record<StatusPedido, string> = {
+  novo: 'novo',
+  aceito: 'aceito',
+  preparando: 'em preparação',
+  saiu_entrega: 'a caminho',
+  pronto_retirada: 'pronto para retirada',
+  concluido: 'concluído',
+  recusado: 'recusado',
+  cancelado: 'cancelado',
+};
 
 /**
  * Item pedido pelo cliente.
@@ -177,3 +200,43 @@ PedidoSchema.index({ cliente: 1, criadoEm: -1 });
 PedidoSchema.virtual('pendente').get(function (this: Pedido) {
   return this.status === 'novo';
 });
+
+/**
+ * Para onde este pedido pode ir a partir de onde está.
+ *
+ * Fica no schema, junto do próprio estado, para a regra não se
+ * espalhar: a tela do lojista desenha os botões a partir daqui, e o
+ * service valida contra a mesma lista. Duas cópias divergiriam.
+ */
+/**
+ * Exposto no JSON para a tela do lojista não repetir a regra.
+ *
+ * Virtual em vez de campo: é derivado do estado atual, e gravá-lo
+ * criaria a chance de ficar desatualizado em relação a ele.
+ */
+PedidoSchema.virtual('proximos').get(function (this: Pedido) {
+  return proximosEstados(this);
+});
+
+export function proximosEstados(pedido: {
+  status: StatusPedido;
+  entrega: TipoEntrega;
+}): StatusPedido[] {
+  const entregar = pedido.entrega === 'entrega';
+
+  switch (pedido.status) {
+    case 'novo':
+      return ['aceito', 'recusado'];
+    case 'aceito':
+      return ['preparando', 'cancelado'];
+    case 'preparando':
+      return [entregar ? 'saiu_entrega' : 'pronto_retirada', 'cancelado'];
+    case 'saiu_entrega':
+    case 'pronto_retirada':
+      // 'concluido' não entra aqui: fechar vira VENDA, e isso passa
+      // pelo endpoint próprio, com forma de pagamento
+      return ['cancelado'];
+    default:
+      return [];
+  }
+}

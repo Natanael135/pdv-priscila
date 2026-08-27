@@ -7,7 +7,13 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, QueryFilter, Types } from 'mongoose';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
 import { VendasService } from '../vendas/vendas.service';
-import { Pedido, PedidoDocument, StatusPedido } from './pedido.schema';
+import {
+  Pedido,
+  PedidoDocument,
+  proximosEstados,
+  ROTULO_STATUS as ROTULO,
+} from './pedido.schema';
+import type { StatusPedido } from './pedido.schema';
 
 export interface FiltroPedidos {
   status?: StatusPedido;
@@ -60,28 +66,51 @@ export class PedidosService {
     return pedido;
   }
 
-  /** Aceita sem fechar a venda ainda: combinar entrega e pagamento vem antes. */
-  async aceitar(id: string) {
+  /**
+   * Move o pedido para o próximo estado.
+   *
+   * Só aceita transições que `proximosEstados` autoriza. Sem isso um
+   * toque repetido na tela poderia mandar um pedido já entregue de
+   * volta para "preparando", e o cliente veria o acompanhamento andar
+   * para trás.
+   */
+  async mudarStatus(id: string, novo: StatusPedido, motivo?: string) {
     const pedido = await this.obter(id);
-    this.exigirPendente(pedido);
 
-    pedido.status = 'aceito';
+    const permitidos = proximosEstados(pedido);
+
+    if (!permitidos.includes(novo)) {
+      throw new BadRequestException(
+        `Um pedido ${ROTULO[pedido.status]} não pode ir para ${ROTULO[novo]}.`,
+      );
+    }
+
+    pedido.status = novo;
+    if (novo === 'recusado' || novo === 'cancelado') {
+      pedido.motivoRecusa = motivo?.trim() || null;
+    }
+
     await pedido.save();
 
+    // respondido é respondido: o aviso de "pedido novo" perde a razão
     await this.notificacoes.limparAvisoDePedido(pedido._id);
+
     return pedido;
   }
 
-  async recusar(id: string, motivo?: string) {
-    const pedido = await this.obter(id);
-    this.exigirPendente(pedido);
+  /*
+   * Aceitar e recusar são atalhos de mudarStatus, não caminhos
+   * próprios: com duas implementações da mesma transição, uma ganharia
+   * uma regra que a outra não tem.
+   */
 
-    pedido.status = 'recusado';
-    pedido.motivoRecusa = motivo?.trim() || null;
-    await pedido.save();
+  /** Aceita sem fechar a venda: combinar entrega e pagamento vem antes. */
+  aceitar(id: string) {
+    return this.mudarStatus(id, 'aceito');
+  }
 
-    await this.notificacoes.limparAvisoDePedido(pedido._id);
-    return pedido;
+  recusar(id: string, motivo?: string) {
+    return this.mudarStatus(id, 'recusado', motivo);
   }
 
   /**
@@ -150,17 +179,4 @@ export class PedidosService {
     return pedido;
   }
 
-  private exigirPendente(pedido: PedidoDocument) {
-    if (pedido.status !== 'novo') {
-      throw new BadRequestException(
-        `Este pedido já foi ${
-          pedido.status === 'aceito'
-            ? 'aceito'
-            : pedido.status === 'concluido'
-              ? 'concluído'
-              : 'encerrado'
-        }`,
-      );
-    }
-  }
 }

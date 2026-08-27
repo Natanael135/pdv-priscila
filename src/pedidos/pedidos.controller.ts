@@ -24,6 +24,16 @@ import { STATUS_PEDIDO } from './pedido.schema';
 import type { StatusPedido } from './pedido.schema';
 import { PedidosService } from './pedidos.service';
 
+class MudarStatusDto {
+  @IsIn(STATUS_PEDIDO, { message: 'Estado de pedido inválido' })
+  status: StatusPedido;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  motivo?: string;
+}
+
 class MotivoDto {
   @IsOptional()
   @IsString()
@@ -90,6 +100,12 @@ export class PedidosController {
   @Patch(':id/visto')
   marcarVisto(@Param('id') id: string) {
     return this.service.marcarVisto(id);
+  }
+
+  /** Avança o acompanhamento: aceito → preparando → a caminho/pronto. */
+  @Patch(':id/status')
+  mudarStatus(@Param('id') id: string, @Body() dto: MudarStatusDto) {
+    return this.service.mudarStatus(id, dto.status, dto.motivo);
   }
 
   @Patch(':id/aceitar')
