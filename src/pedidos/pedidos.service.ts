@@ -151,6 +151,9 @@ export class PedidosService {
       desconto: dados.desconto,
       vencimentoFiado: dados.vencimentoFiado,
       observacao: `Pedido #${pedido.numero} do catálogo online`,
+      // carimba a procedência: é por aqui que a tela de vendas filtra
+      origem: 'catalogo',
+      pedido: pedido._id,
     } as never);
 
     pedido.status = 'concluido';

@@ -15,6 +15,7 @@ import { EstoqueService } from '../estoque/estoque.service';
 import { Parcela } from '../parcelas/parcela.schema';
 import { Produto, Variacao } from '../produtos/produto.schema';
 import { Venda, VendaDocument, VendaItem } from './venda.schema';
+import type { OrigemVenda } from './venda.schema';
 import { RegistrarVendaDto } from './vendas.dto';
 
 export interface FiltroVendas {
@@ -22,6 +23,8 @@ export interface FiltroVendas {
   fim?: string;
   cliente?: string;
   situacao?: 'pago' | 'parcial' | 'fiado';
+  /** 'catalogo' = veio de pedido pela internet */
+  origem?: OrigemVenda;
   incluirCanceladas?: boolean;
   busca?: string;
   limite?: number;
@@ -338,6 +341,7 @@ export class VendasService {
     if (!filtro.incluirCanceladas) query.status = 'concluida';
     if (filtro.cliente) query.cliente = filtro.cliente;
     if (filtro.situacao) query.situacao = filtro.situacao;
+    if (filtro.origem) query.origem = filtro.origem;
 
     if (filtro.inicio || filtro.fim) {
       // Mesmo cuidado do dashboard: o dia começa e termina no fuso da

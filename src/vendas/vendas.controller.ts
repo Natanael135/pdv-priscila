@@ -11,6 +11,7 @@ import {
 } from '@nestjs/common';
 import { CancelarVendaDto, RegistrarVendaDto } from './vendas.dto';
 import { VendasService } from './vendas.service';
+import type { OrigemVenda } from './venda.schema';
 
 @Controller('vendas')
 export class VendasController {
@@ -22,6 +23,8 @@ export class VendasController {
     @Query('fim') fim?: string,
     @Query('cliente') cliente?: string,
     @Query('situacao') situacao?: 'pago' | 'parcial' | 'fiado',
+    /** 'catalogo' = veio de pedido pela internet */
+    @Query('origem') origem?: OrigemVenda,
     @Query('busca') busca?: string,
     @Query('incluirCanceladas') incluirCanceladas?: string,
     @Query('limite') limite?: string,
@@ -31,6 +34,7 @@ export class VendasController {
       fim,
       cliente,
       situacao,
+      origem,
       busca,
       incluirCanceladas: incluirCanceladas === 'true',
       limite: Number(limite) || undefined,

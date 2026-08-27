@@ -78,11 +78,28 @@ export class Pagamento {
 
 export const PagamentoSchema = SchemaFactory.createForClass(Pagamento);
 
+export const ORIGENS_VENDA = ['balcao', 'catalogo'] as const;
+export type OrigemVenda = (typeof ORIGENS_VENDA)[number];
+
 @Schema(opcoesSchema)
 export class Venda {
   /** nº do cupom, sequencial e amigável (vem do ContadorService) */
   @Prop({ required: true, unique: true })
   numero: number;
+
+  /**
+   * De onde a venda veio.
+   *
+   * Antes isso só existia como texto na observação ("Pedido #12 do
+   * catálogo"), o que serve para ler mas não para filtrar nem somar.
+   * Como campo, dá para responder "quanto o site me trouxe este mês?".
+   */
+  @Prop({ type: String, default: 'balcao', enum: ORIGENS_VENDA })
+  origem: OrigemVenda;
+
+  /** pedido que originou esta venda; null nas vendas de balcão */
+  @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Pedido', default: null })
+  pedido: Types.ObjectId | null;
 
   @Prop({ type: MongooseSchema.Types.ObjectId, ref: 'Cliente', default: null })
   cliente: Types.ObjectId | null;
