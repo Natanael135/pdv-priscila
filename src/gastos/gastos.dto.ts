@@ -2,6 +2,7 @@ import {
   IsBoolean,
   IsDateString,
   IsIn,
+  IsInt,
   IsNumber,
   IsOptional,
   IsString,
@@ -28,6 +29,20 @@ export class CriarGastoDto {
 
   @IsDateString({}, { message: 'Data inválida' })
   data: string;
+
+  /**
+   * Em quantas vezes. O `valor` é sempre o TOTAL da compra: 500 em 5x
+   * vira cinco lançamentos de 100, um por mês.
+   *
+   * Doze é o teto porque é o que a loja usa de verdade, e um número
+   * digitado errado — 120 no lugar de 12 — criaria dez anos de
+   * lançamentos que alguém teria de apagar um por um.
+   */
+  @IsOptional()
+  @IsInt({ message: 'Número de parcelas inválido' })
+  @Min(1, { message: 'No mínimo 1 parcela' })
+  @Max(12, { message: 'No máximo 12 parcelas' })
+  parcelas?: number;
 
   @IsOptional()
   @IsBoolean()

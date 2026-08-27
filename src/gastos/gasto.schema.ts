@@ -107,6 +107,24 @@ export class Gasto {
   @Prop({ type: String, default: null })
   referencia: string | null;
 
+  /**
+   * Amarra as parcelas de uma mesma compra.
+   *
+   * Sem isto, cinco lançamentos de 100 reais ficariam soltos e não
+   * daria para dizer que são a mesma compra de 500 — nem para editar
+   * ou apagar a compra inteira de uma vez.
+   */
+  @Prop({ type: String, default: null })
+  grupo: string | null;
+
+  /** 2 em "2/5"; 1 quando não é parcelado */
+  @Prop({ default: 1, min: 1 })
+  parcela: number;
+
+  /** 5 em "2/5"; 1 quando não é parcelado */
+  @Prop({ default: 1, min: 1 })
+  totalParcelas: number;
+
   @Prop({ type: String, default: null })
   observacao: string | null;
 }

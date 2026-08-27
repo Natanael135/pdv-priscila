@@ -10,6 +10,7 @@ import {
 } from '../common/fuso';
 import { dinheiro, margemDoTotal } from '../common/margem';
 import { Parcela } from '../parcelas/parcela.schema';
+import { Pedido } from '../pedidos/pedido.schema';
 import { GastosService } from '../gastos/gastos.service';
 import { Produto } from '../produtos/produto.schema';
 import { Venda } from '../vendas/venda.schema';
@@ -20,8 +21,98 @@ export class DashboardService {
     @InjectModel(Venda.name) private readonly vendas: Model<Venda>,
     @InjectModel(Produto.name) private readonly produtos: Model<Produto>,
     @InjectModel(Parcela.name) private readonly parcelas: Model<Parcela>,
+    @InjectModel(Pedido.name) private readonly pedidos: Model<Pedido>,
     private readonly gastos: GastosService,
   ) {}
+
+  /**
+   * O que precisa de atenção hoje, para a tela que abre o app.
+   *
+   * É diferente do resumo financeiro: aqui não interessa quanto se
+   * faturou, e sim o que está pendurado — cliente para cobrar, conta
+   * atrasada, pedido esperando resposta, prateleira vazia.
+   */
+  async visaoGeral() {
+    const [produtos, estoque, receber, aPagar, pedidosNovos] = await Promise.all(
+      [
+        this.produtos.countDocuments({ ativo: true }),
+        this.contagemDeEstoque(),
+        this.pendencias(),
+        this.gastos.vencidos(),
+        this.pedidos.countDocuments({ status: 'novo' }),
+      ],
+    );
+
+    return {
+      produtos,
+      estoque,
+      receber,
+      aPagar: { quantidade: aPagar.quantidade, total: aPagar.total },
+      pedidosNovos,
+    };
+  }
+
+  /**
+   * Quantos produtos em cada situação de prateleira.
+   *
+   * A régua é a mesma de comSituacao() em produtos.service — quem não
+   * controla estoque conta como disponível, porque para essas peças a
+   * pergunta "acabou?" não faz sentido.
+   */
+  private async contagemDeEstoque() {
+    const [linha] = await this.produtos.aggregate<{
+      disponivel: number;
+      acabando: number;
+      acabou: number;
+    }>([
+      { $match: { ativo: true } },
+      {
+        $group: {
+          _id: null,
+          acabou: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    '$controlaEstoque',
+                    { $lte: ['$estoqueAtual', 0] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          acabando: {
+            $sum: {
+              $cond: [
+                {
+                  $and: [
+                    '$controlaEstoque',
+                    { $gt: ['$estoqueAtual', 0] },
+                    { $lte: ['$estoqueAtual', '$estoqueMinimo'] },
+                  ],
+                },
+                1,
+                0,
+              ],
+            },
+          },
+          total: { $sum: 1 },
+        },
+      },
+      {
+        $project: {
+          _id: 0,
+          acabou: 1,
+          acabando: 1,
+          disponivel: { $subtract: ['$total', { $add: ['$acabou', '$acabando'] }] },
+        },
+      },
+    ]);
+
+    return linha ?? { disponivel: 0, acabando: 0, acabou: 0 };
+  }
 
   async resumo(inicioTexto?: string, fimTexto?: string) {
     // As bordas do período vêm do fuso da loja, não do relógio do

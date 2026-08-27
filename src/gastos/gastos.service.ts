@@ -64,12 +64,56 @@ export class GastosService {
     return gasto;
   }
 
-  criar(dto: CriarGastoDto) {
-    return this.modelo.create({
-      ...dto,
-      data: inicioDoDia(dto.data),
-      pagoEm: dto.pago ? new Date() : null,
-    });
+  /**
+   * Lança o gasto. Com `parcelas`, vira uma linha por mês.
+   *
+   * O `valor` do dto é sempre o TOTAL da compra — "gastei 500 em 5x" —
+   * porque é assim que a pessoa fala e é o número que está no cupom. A
+   * divisão acontece aqui, não na cabeça de quem digita.
+   *
+   * Cada parcela é um Gasto de verdade, com a data do mês dela. Um
+   * lançamento único de 500 em janeiro faria fevereiro e março
+   * parecerem meses baratos, e o ponto de equilíbrio desses meses sairia
+   * menor do que é.
+   */
+  async criar(dto: CriarGastoDto) {
+    const { parcelas: vezes = 1, ...campos } = dto;
+    const primeira = inicioDoDia(dto.data);
+
+    if (vezes <= 1) {
+      return this.modelo.create({
+        ...campos,
+        data: primeira,
+        pagoEm: dto.pago ? new Date() : null,
+      });
+    }
+
+    /*
+     * O centavo que sobra vai na ÚLTIMA parcela.
+     *
+     * 500 em 3x dá 166,67 + 166,67 + 166,66. Jogando a sobra na última,
+     * as primeiras batem com o valor que a maquininha mostrou, e a soma
+     * fecha exatamente com o total — sem isso, cinco arredondamentos
+     * para cima cobrariam um centavo a mais do que a compra custou.
+     */
+    const cada = dinheiro(dto.valor / vezes);
+    const ultima = dinheiro(dto.valor - cada * (vezes - 1));
+    const grupo = new Types.ObjectId().toString();
+
+    const lancamentos = Array.from({ length: vezes }, (_, i) => ({
+      ...campos,
+      valor: i === vezes - 1 ? ultima : cada,
+      data: dayjs(primeira).add(i, 'month').toDate(),
+      // só a primeira pode já nascer paga; as outras ainda vão vencer
+      pago: i === 0 ? (dto.pago ?? false) : false,
+      pagoEm: i === 0 && dto.pago ? new Date() : null,
+      grupo,
+      parcela: i + 1,
+      totalParcelas: vezes,
+    }));
+
+    const criados = await this.modelo.create(lancamentos);
+    return criados[0];
   }
 
   async atualizar(id: string, dto: AtualizarGastoDto) {
