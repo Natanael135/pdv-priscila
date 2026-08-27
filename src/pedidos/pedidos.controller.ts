@@ -20,6 +20,8 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { FORMAS_PAGAMENTO } from '../vendas/venda.schema';
+import type { FormaPagamento } from '../vendas/venda.schema';
 import { STATUS_PEDIDO } from './pedido.schema';
 import type { StatusPedido } from './pedido.schema';
 import { PedidosService } from './pedidos.service';
