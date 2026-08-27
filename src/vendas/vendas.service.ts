@@ -9,6 +9,8 @@ import { ClientSession, Connection, Model, QueryFilter, Types } from 'mongoose';
 import { Cliente, ClienteDocument } from '../clientes/cliente.schema';
 import { ContadorService } from '../common/contador.service';
 import { fimDoDia, inicioDoDia } from '../common/fuso';
+import { custoDoItem, precoDaTabela } from '../common/precos';
+import type { TabelaDePreco } from '../common/precos';
 import { dinheiro, moeda } from '../common/margem';
 import { Configuracao } from '../configuracoes/configuracao.schema';
 import { EstoqueService } from '../estoque/estoque.service';
@@ -89,6 +91,7 @@ export class VendasService {
     session: ClientSession,
   ): Promise<Types.ObjectId> {
     // ── Itens ──────────────────────────────────────────────────────
+    const tabela: TabelaDePreco = dto.tabelaPreco ?? 'avista';
     const ids = dto.itens.map((i) => new Types.ObjectId(i.produto));
     const produtos = await this.produtos
       .find({ _id: { $in: ids } })
@@ -154,9 +157,15 @@ export class VendasService {
         );
       }
 
-      // preço da variação tem prioridade; sem ele, o do produto
+      /*
+       * O preço vem da tabela da venda (à vista, crédito ou fiado).
+       *
+       * Só quando o app manda um preço explícito é que ele vence — é o
+       * caso de quem mexeu no preço da linha ali no carrinho.
+       */
       const precoUnitario =
-        entrada.precoUnitario ?? variacao?.precoVenda ?? produto.precoVenda;
+        entrada.precoUnitario ?? precoDaTabela(produto, variacao, tabela);
+      const custoUnitario = custoDoItem(produto, variacao);
       const desconto = entrada.desconto ?? 0;
       const total = dinheiro(entrada.quantidade * precoUnitario - desconto);
 
@@ -174,13 +183,13 @@ export class VendasService {
         variacaoDescricao: variacao ? descreverVariacao(variacao) : null,
         quantidade: entrada.quantidade,
         precoUnitario,
-        custoUnitario: produto.precoCompra,
+        custoUnitario,
         desconto,
         total,
       });
 
       subtotal = dinheiro(subtotal + total);
-      custoTotal = dinheiro(custoTotal + entrada.quantidade * produto.precoCompra);
+      custoTotal = dinheiro(custoTotal + entrada.quantidade * custoUnitario);
     }
 
     if (semEstoque.length) {
@@ -257,6 +266,7 @@ export class VendasService {
             valor: p.valor,
             parcelas: p.parcelas ?? 1,
           })),
+          tabelaPreco: tabela,
           subtotal,
           desconto,
           total,

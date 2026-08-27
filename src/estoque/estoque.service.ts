@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model, Types } from 'mongoose';
+import { custoDoItem } from '../common/precos';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
 import {
   Produto,
@@ -118,7 +119,8 @@ export class EstoqueService {
           quantidade: entrada.tipo === 'ajuste' ? Math.abs(delta) : quantidade,
           estoqueAnterior: anterior,
           estoqueNovo: variacao ? variacao.estoqueAtual : produto.estoqueAtual,
-          custoUnitario: entrada.custoUnitario ?? produto.precoCompra,
+          custoUnitario:
+            entrada.custoUnitario ?? custoDoItem(produto, variacao),
           venda: entrada.vendaId ?? null,
           /**
            * Só na entrada. Numa saída ou venda o campo não teria

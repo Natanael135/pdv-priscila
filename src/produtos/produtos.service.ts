@@ -20,10 +20,7 @@ export interface FiltroProdutos {
 }
 
 export type OrdemMargem =
-  | 'margemPercentual'
-  | 'lucroGerado'
-  | 'quantidadeVendida'
-  | 'nome';
+  'margemPercentual' | 'lucroGerado' | 'quantidadeVendida' | 'nome';
 
 @Injectable()
 export class ProdutosService {
@@ -133,7 +130,10 @@ export class ProdutosService {
       tamanho: v.tamanho ?? null,
       codigoBarras: v.codigoBarras ?? null,
       estoqueMinimo: v.estoqueMinimo ?? 0,
+      precoCompra: v.precoCompra ?? null,
       precoVenda: v.precoVenda ?? null,
+      precoCredito: v.precoCredito ?? null,
+      precoFiado: v.precoFiado ?? null,
       ativo: v.ativo ?? true,
       estoqueAtual: 0,
     }));
@@ -232,9 +232,14 @@ export class ProdutosService {
         tamanho: v.tamanho ?? null,
         codigoBarras: v.codigoBarras ?? null,
         estoqueMinimo: v.estoqueMinimo ?? 0,
+        precoCompra: v.precoCompra ?? null,
         precoVenda: v.precoVenda ?? null,
+        precoCredito: v.precoCredito ?? null,
+        precoFiado: v.precoFiado ?? null,
         ativo: v.ativo ?? true,
-        estoqueAtual: v.id ? (saldoAnterior.get(v.id) ?? 0) : (v.estoqueAtual ?? 0),
+        estoqueAtual: v.id
+          ? (saldoAnterior.get(v.id) ?? 0)
+          : (v.estoqueAtual ?? 0),
       }));
 
       // o saldo do produto acompanha a soma da grade
@@ -393,7 +398,9 @@ export class ProdutosService {
   private async garantirCodigoLivre(codigo?: string | null) {
     if (!codigo) return;
 
-    const existente = await this.modelo.findOne({ codigoBarras: codigo }).exec();
+    const existente = await this.modelo
+      .findOne({ codigoBarras: codigo })
+      .exec();
     if (existente) {
       throw new BadRequestException(
         `O código ${codigo} já está no produto "${existente.nome}"`,

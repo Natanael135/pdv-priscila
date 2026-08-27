@@ -1,6 +1,8 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument, Schema as MongooseSchema, Types } from 'mongoose';
 import { dinheiro } from '../common/margem';
+import { TABELAS_DE_PRECO } from '../common/precos';
+import type { TabelaDePreco } from '../common/precos';
 import { opcoesSchema } from '../common/schema-options';
 
 export type VendaDocument = HydratedDocument<Venda>;
@@ -120,6 +122,16 @@ export class Venda {
   /** soma dos itens, já com o desconto de cada item */
   @Prop({ default: 0 })
   subtotal: number;
+
+  /**
+   * Por qual tabela esta venda foi fechada.
+   *
+   * Fica gravado junto porque o preço do item é fotografia: sem a
+   * tabela, olhando a venda de ontem não dá para saber se aqueles R$ 55
+   * eram o preço de crédito ou um reajuste que aconteceu depois.
+   */
+  @Prop({ type: String, default: 'avista', enum: TABELAS_DE_PRECO })
+  tabelaPreco: TabelaDePreco;
 
   /** desconto aplicado no total da venda, em R$ */
   @Prop({ default: 0 })

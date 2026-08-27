@@ -56,9 +56,27 @@ export class Variacao {
   @Prop({ default: 0, min: 0 })
   estoqueMinimo: number;
 
-  /** preço próprio; null = usa o preço do produto */
+  /**
+   * Custo próprio desta variação; null = usa o do produto.
+   *
+   * Existe porque a mesma peça às vezes entra mais barata numa cor ou
+   * numa estampa. Sem isto, a variação barata aparece com a margem da
+   * cara, e a decisão de repor sai errada.
+   */
+  @Prop({ type: Number, default: null })
+  precoCompra: number | null;
+
+  /** preço próprio à vista; null = usa o preço do produto */
   @Prop({ type: Number, default: null })
   precoVenda: number | null;
+
+  /** preço próprio no crédito; null = ver precoDaTabela em common/precos */
+  @Prop({ type: Number, default: null })
+  precoCredito: number | null;
+
+  /** preço próprio no fiado; null = ver precoDaTabela em common/precos */
+  @Prop({ type: Number, default: null })
+  precoFiado: number | null;
 
   @Prop({ default: true })
   ativo: boolean;
@@ -114,8 +132,22 @@ export class Produto {
   @Prop({ required: true, default: 0, min: 0 })
   precoCompra: number;
 
+  /** o preço à vista, e a base de tudo */
   @Prop({ required: true, default: 0, min: 0 })
   precoVenda: number;
+
+  /**
+   * Preço no cartão de crédito e no fiado; null = vende pelo à vista.
+   *
+   * Ficam separados porque o acréscimo de um não é o do outro: o
+   * crédito paga a taxa da maquininha, o fiado paga o risco e a espera.
+   * Deixar em branco é dizer "não tenho acréscimo neste".
+   */
+  @Prop({ type: Number, default: null, min: 0 })
+  precoCredito: number | null;
+
+  @Prop({ type: Number, default: null, min: 0 })
+  precoFiado: number | null;
 
   @Prop({ default: 'un' })
   unidade: string;

@@ -4,6 +4,7 @@ import {
   IsArray,
   IsDateString,
   IsEnum,
+  IsIn,
   IsInt,
   IsMongoId,
   IsNumber,
@@ -13,6 +14,8 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
+import { TABELAS_DE_PRECO } from '../common/precos';
+import type { TabelaDePreco } from '../common/precos';
 import { FORMAS_PAGAMENTO } from './venda.schema';
 import type { FormaPagamento } from './venda.schema';
 
@@ -79,6 +82,11 @@ export class RegistrarVendaDto {
   @ValidateNested({ each: true })
   @Type(() => PagamentoVendaDto)
   pagamentos: PagamentoVendaDto[];
+
+  /** por qual tabela a venda foi fechada; padrão à vista */
+  @IsOptional()
+  @IsIn(TABELAS_DE_PRECO)
+  tabelaPreco?: TabelaDePreco;
 
   /** desconto sobre o total da venda, em R$ */
   @IsOptional()

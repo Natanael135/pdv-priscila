@@ -10,10 +10,11 @@ import { Model, Types } from 'mongoose';
 import { Cliente } from '../clientes/cliente.schema';
 import { ContadorService } from '../common/contador.service';
 import { dinheiro, moeda } from '../common/margem';
+import { precoDaTabela, tabelaDaForma } from '../common/precos';
 import { Configuracao } from '../configuracoes/configuracao.schema';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
 import { ItemPedido, Pedido, PedidoDocument } from '../pedidos/pedido.schema';
-import { Produto } from '../produtos/produto.schema';
+import { Produto, Variacao } from '../produtos/produto.schema';
 import { PushService } from '../push/push.service';
 import { CriarPedidoDto, PreCadastroDto } from './publico.dto';
 import { SessaoPublica, SessaoPublicaDocument } from './sessao.schema';
@@ -73,7 +74,8 @@ export class PublicoService {
             id: String(id),
             descricao:
               [v.tamanho, v.cor].filter(Boolean).join(' · ') || 'Padrão',
-            preco: v.precoVenda ?? p.precoVenda,
+            preco: precoDaTabela(p, v, 'avista'),
+            precoCredito: precoDeCreditoVisivel(p, v),
             disponivel: !p.controlaEstoque || v.estoqueAtual > 0,
             fotoUrl:
               (p.fotos ?? []).find((f) => String(f.variacaoId) === String(id))
@@ -87,7 +89,13 @@ export class PublicoService {
         id: String((p as unknown as { _id: Types.ObjectId })._id),
         nome: p.nome,
         descricao: p.descricao,
-        preco: p.precoVenda,
+        preco: precoDaTabela(p, null, 'avista'),
+        /*
+         * Só aparece quando é diferente do à vista. Repetir o mesmo
+         * número duas vezes na etiqueta faz o cliente procurar a
+         * diferença que não existe.
+         */
+        precoCredito: precoDeCreditoVisivel(p, null),
         fotoUrl: p.fotos?.[0]?.url ?? null,
         fotos: (p.fotos ?? []).map((f) => f.url),
         categoria: categoria?.nome ?? 'Outros',
@@ -314,6 +322,12 @@ export class PublicoService {
       );
     }
 
+    /*
+     * O catálogo não tem fiado — o cliente da internet escolhe entre
+     * pix, dinheiro, débito e crédito. Só o crédito muda de tabela.
+     */
+    const tabela = tabelaDaForma(dto.formaPagamento);
+
     const itens: ItemPedido[] = [];
 
     for (const pedido of dto.itens) {
@@ -325,7 +339,7 @@ export class PublicoService {
 
       let variacaoId: Types.ObjectId | null = null;
       let variacaoDescricao: string | null = null;
-      let preco = produto.precoVenda;
+      let variacao: Variacao | null = null;
 
       if ((produto.variacoes ?? []).length > 0) {
         if (!pedido.variacao) {
@@ -334,11 +348,12 @@ export class PublicoService {
           );
         }
 
-        const variacao = produto.variacoes.find(
-          (v) =>
-            String((v as unknown as { _id: Types.ObjectId })._id) ===
-            pedido.variacao,
-        );
+        variacao =
+          produto.variacoes.find(
+            (v) =>
+              String((v as unknown as { _id: Types.ObjectId })._id) ===
+              pedido.variacao,
+          ) ?? null;
 
         if (!variacao || !variacao.ativo) {
           throw new BadRequestException(
@@ -350,8 +365,15 @@ export class PublicoService {
         variacaoDescricao =
           [variacao.tamanho, variacao.cor].filter(Boolean).join(' · ') ||
           'Padrão';
-        preco = variacao.precoVenda ?? produto.precoVenda;
       }
+
+      /*
+       * O preço é lido do banco, nunca do que o site mandou — é o que
+       * impede alguém de fechar o pedido com o preço que quiser. Sai da
+       * tabela da forma de pagamento escolhida: crédito na internet
+       * custa o mesmo que crédito no balcão.
+       */
+      const preco = precoDaTabela(produto, variacao, tabela);
 
       itens.push({
         produto: (produto as unknown as { _id: Types.ObjectId })._id,
@@ -493,4 +515,20 @@ export class PublicoService {
       })),
     };
   }
+}
+
+/**
+ * O preço de crédito para a etiqueta, ou null quando não há diferença.
+ *
+ * Repetir o mesmo número duas vezes na vitrine faz o cliente procurar
+ * uma diferença que não existe — e desconfiar quando não acha.
+ */
+function precoDeCreditoVisivel(
+  produto: Produto,
+  variacao: Variacao | null,
+): number | null {
+  const avista = precoDaTabela(produto, variacao, 'avista');
+  const credito = precoDaTabela(produto, variacao, 'credito');
+
+  return credito > avista ? credito : null;
 }
