@@ -78,6 +78,10 @@ export class Variacao {
   @Prop({ type: Number, default: null })
   precoFiado: number | null;
 
+  /** preço próprio de atacado; null = ver precoDaTabela em common/precos */
+  @Prop({ type: Number, default: null })
+  precoRevenda: number | null;
+
   @Prop({ default: true })
   ativo: boolean;
 }
@@ -148,6 +152,20 @@ export class Produto {
 
   @Prop({ type: Number, default: null, min: 0 })
   precoFiado: number | null;
+
+  /**
+   * Preço de atacado, para quem compra para revender.
+   *
+   * Não depende da forma de pagamento: quem revende paga este preço
+   * pagando como pagar. Em branco, o revendedor leva pelo preço à
+   * vista — que é o mesmo de todo mundo, então vale conferir se foi
+   * esquecimento.
+   *
+   * NUNCA sai pela API pública. É informação da lojista: o cliente do
+   * site não pode nem saber que existe outro preço.
+   */
+  @Prop({ type: Number, default: null, min: 0 })
+  precoRevenda: number | null;
 
   @Prop({ default: 'un' })
   unidade: string;

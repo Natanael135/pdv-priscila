@@ -134,6 +134,7 @@ export class ProdutosService {
       precoVenda: v.precoVenda ?? null,
       precoCredito: v.precoCredito ?? null,
       precoFiado: v.precoFiado ?? null,
+      precoRevenda: v.precoRevenda ?? null,
       ativo: v.ativo ?? true,
       estoqueAtual: 0,
     }));
@@ -236,6 +237,7 @@ export class ProdutosService {
         precoVenda: v.precoVenda ?? null,
         precoCredito: v.precoCredito ?? null,
         precoFiado: v.precoFiado ?? null,
+        precoRevenda: v.precoRevenda ?? null,
         ativo: v.ativo ?? true,
         estoqueAtual: v.id
           ? (saldoAnterior.get(v.id) ?? 0)
@@ -258,7 +260,10 @@ export class ProdutosService {
        */
       const grade = atualizacao.variacoes as { estoqueAtual: number }[];
       if (grade.length > 0) {
-        atualizacao.estoqueAtual = grade.reduce((s, v) => s + v.estoqueAtual, 0);
+        atualizacao.estoqueAtual = grade.reduce(
+          (s, v) => s + v.estoqueAtual,
+          0,
+        );
       }
     }
 

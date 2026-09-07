@@ -62,6 +62,11 @@ export class VariacaoDto {
   precoFiado?: number | null;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  precoRevenda?: number | null;
+
+  @IsOptional()
   @IsBoolean()
   ativo?: boolean;
 }
@@ -152,6 +157,11 @@ export class CriarProdutoDto {
   precoFiado?: number | null;
 
   @IsOptional()
+  @IsNumber()
+  @Min(0)
+  precoRevenda?: number | null;
+
+  @IsOptional()
   @IsString()
   unidade?: string;
 
@@ -228,6 +238,11 @@ export class AtualizarProdutoDto {
   @IsNumber()
   @Min(0)
   precoFiado?: number | null;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  precoRevenda?: number | null;
 
   @IsOptional()
   @IsString()

@@ -28,6 +28,19 @@ export class Cliente {
   @Prop({ default: 0 })
   limiteFiado: number;
 
+  /**
+   * Compra para revender, e por isso leva pelo preço de atacado.
+   *
+   * A marca fica no CLIENTE, e não na venda: quem revende revende
+   * sempre, e ter de lembrar de marcar em cada venda é o mesmo que não
+   * ter a tabela — um esquecimento por semana já come a diferença.
+   *
+   * Só a lojista marca. O cadastro do site não tem este campo, de
+   * propósito — ver publico.service.
+   */
+  @Prop({ default: false })
+  revendedor: boolean;
+
   @Prop({ default: true })
   ativo: boolean;
 }

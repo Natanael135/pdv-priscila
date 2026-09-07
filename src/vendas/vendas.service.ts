@@ -90,8 +90,35 @@ export class VendasService {
     dto: RegistrarVendaDto & DadosInternosDaVenda,
     session: ClientSession,
   ): Promise<Types.ObjectId> {
+    /*
+     * O cliente vem primeiro porque ele decide o preço.
+     *
+     * Revendedor leva pela tabela de atacado, e isso tem de valer antes
+     * do primeiro item ser precificado — carregá-lo no fim, só para
+     * gravar o nome no cupom, chegaria tarde demais.
+     */
+    const cliente = dto.cliente
+      ? await this.clientes.findById(dto.cliente).session(session).exec()
+      : null;
+
+    if (dto.cliente && !cliente) {
+      throw new NotFoundException('Cliente não encontrado');
+    }
+
+    /*
+     * A tabela que o app mandou vale para tudo, MENOS para revendedor.
+     *
+     * Quem revende leva o atacado mesmo que o app tenha pedido outra
+     * coisa: a marca está no cadastro do cliente, e é a lojista quem a
+     * põe lá. Deixar o corpo da requisição vencer permitiria fechar uma
+     * venda de atacado no varejo por descuido — ou o contrário, o que é
+     * pior.
+     */
+    const tabela: TabelaDePreco = cliente?.revendedor
+      ? 'revenda'
+      : (dto.tabelaPreco ?? 'avista');
+
     // ── Itens ──────────────────────────────────────────────────────
-    const tabela: TabelaDePreco = dto.tabelaPreco ?? 'avista';
     const ids = dto.itens.map((i) => new Types.ObjectId(i.produto));
     const produtos = await this.produtos
       .find({ _id: { $in: ids } })
@@ -240,15 +267,6 @@ export class VendasService {
 
     const situacao =
       totalFiado === 0 ? 'pago' : totalFiado >= total ? 'fiado' : 'parcial';
-
-    // ── Cliente ────────────────────────────────────────────────────
-    const cliente = dto.cliente
-      ? await this.clientes.findById(dto.cliente).session(session).exec()
-      : null;
-
-    if (dto.cliente && !cliente) {
-      throw new NotFoundException('Cliente não encontrado');
-    }
 
     // ── Grava ──────────────────────────────────────────────────────
     const numero = await this.contador.proximo('venda', session);

@@ -51,6 +51,15 @@ export class CriarClienteDto {
   @IsNumber()
   @Min(0)
   limiteFiado?: number;
+
+  /**
+   * Compra para revender: leva pelo preço de atacado, em toda venda.
+   *
+   * Só a lojista marca — o cadastro do site não expõe este campo.
+   */
+  @IsOptional()
+  @IsBoolean()
+  revendedor?: boolean;
 }
 
 export class AtualizarClienteDto extends CriarClienteDto {

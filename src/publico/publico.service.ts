@@ -323,8 +323,16 @@ export class PublicoService {
     }
 
     /*
-     * O catálogo não tem fiado — o cliente da internet escolhe entre
-     * pix, dinheiro, débito e crédito. Só o crédito muda de tabela.
+     * O pedido do site é SEMPRE varejo.
+     *
+     * Usa `tabelaDaForma` de propósito, e não `tabelaDaVenda`: mesmo
+     * que quem esteja pedindo seja um revendedor cadastrado, o preço de
+     * atacado não vale aqui. Atacado é venda que a lojista faz pelo app,
+     * olho no olho — e expor aquele preço na internet entregaria a
+     * margem da loja para qualquer um que criasse um cadastro.
+     *
+     * O catálogo também não tem fiado: sobram pix, dinheiro, débito e
+     * crédito, e só o cartão muda de tabela.
      */
     const tabela = tabelaDaForma(dto.formaPagamento);
 

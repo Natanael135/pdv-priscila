@@ -1,18 +1,32 @@
 import type { FormaPagamento } from '../vendas/venda.schema';
 
 /**
- * A loja trabalha com três tabelas: à vista sai mais barato, cartão de
- * crédito e fiado saem mais caro, e o acréscimo de um não é igual ao do
- * outro — o crédito paga a taxa da maquininha, o fiado paga o risco e a
- * espera.
+ * As quatro tabelas da loja.
+ *
+ * Três delas dependem de COMO se paga: à vista sai mais barato, cartão
+ * e fiado saem mais caro, e o acréscimo de um não é o do outro — o
+ * cartão paga a taxa da maquininha, o fiado paga o risco e a espera.
+ *
+ * A quarta depende de QUEM compra. Revendedor leva por preço de
+ * atacado: compra para vender de novo, leva mais peças e volta sempre.
+ * Por isso ela não entra no rodízio das outras — ver `tabelaDaVenda`.
  */
-export const TABELAS_DE_PRECO = ['avista', 'credito', 'fiado'] as const;
+export const TABELAS_DE_PRECO = ['avista', 'credito', 'fiado', 'revenda'] as const;
 export type TabelaDePreco = (typeof TABELAS_DE_PRECO)[number];
 
 export const ROTULO_DA_TABELA: Record<TabelaDePreco, string> = {
   avista: 'à vista',
   credito: 'cartão',
   fiado: 'fiado',
+  revenda: 'revenda',
+};
+
+/** o campo de cada tabela; à vista é o preço base e não tem campo próprio */
+const CAMPO_DA_TABELA: Record<TabelaDePreco, keyof PrecosDoItem | null> = {
+  avista: null,
+  credito: 'precoCredito',
+  fiado: 'precoFiado',
+  revenda: 'precoRevenda',
 };
 
 /** o que cada preço precisa ter para ser consultado */
@@ -20,6 +34,11 @@ export interface PrecosDoItem {
   precoVenda: number | null;
   precoCredito?: number | null;
   precoFiado?: number | null;
+  /**
+   * Preço de atacado. NUNCA sai pela API pública — é informação da
+   * lojista, e o cliente do site não pode nem saber que existe.
+   */
+  precoRevenda?: number | null;
 }
 
 /**
@@ -37,6 +56,26 @@ export function tabelaDaForma(forma: FormaPagamento): TabelaDePreco {
   if (forma === 'credito' || forma === 'debito') return 'credito';
   if (forma === 'fiado') return 'fiado';
   return 'avista';
+}
+
+/**
+ * A tabela desta venda, considerando o cliente E a forma de pagamento.
+ *
+ * Quem revende vence a forma de pagamento: o preço de atacado já é o
+ * acordo com aquela pessoa, e somar a taxa da maquininha por cima
+ * desfaria o acordo no caixa. Uma revendedora que paga no cartão paga o
+ * preço de revenda — a loja escolheu absorver a taxa quando definiu
+ * aquele preço.
+ *
+ * Sem cliente, ou com cliente comum, manda a forma de pagamento, como
+ * sempre foi.
+ */
+export function tabelaDaVenda(
+  cliente: { revendedor?: boolean } | null | undefined,
+  forma: FormaPagamento | null | undefined,
+): TabelaDePreco {
+  if (cliente?.revendedor) return 'revenda';
+  return forma ? tabelaDaForma(forma) : 'avista';
 }
 
 /**
@@ -59,24 +98,26 @@ export function tabelaDaForma(forma: FormaPagamento): TabelaDePreco {
  * O custo disso é que uma variação com preço próprio e sem preço de
  * crédito vende no cartão pelo preço à vista dela, sem acréscimo. O app
  * avisa isso na tela da variação, para ser escolha e não surpresa.
+ *
+ * Vale igual para revenda: variação com preço próprio e sem preço de
+ * atacado sai pelo próprio preço dela, não pelo atacado do produto.
+ * Aqui o efeito é a favor da lojista — cobra o varejo da variação em
+ * vez do atacado do produto —, mas continua sendo surpresa se ninguém
+ * avisar, então o app avisa do mesmo jeito.
  */
 export function precoDaTabela(
   produto: PrecosDoItem,
   variacao: PrecosDoItem | null | undefined,
   tabela: TabelaDePreco,
 ): number {
-  const campo = tabela === 'credito' ? 'precoCredito' : 'precoFiado';
+  const campo = CAMPO_DA_TABELA[tabela];
 
   if (variacao) {
-    if (tabela !== 'avista' && ehPreco(variacao[campo])) {
-      return variacao[campo] as number;
-    }
+    if (campo && ehPreco(variacao[campo])) return variacao[campo] as number;
     if (ehPreco(variacao.precoVenda)) return variacao.precoVenda as number;
   }
 
-  if (tabela !== 'avista' && ehPreco(produto[campo])) {
-    return produto[campo] as number;
-  }
+  if (campo && ehPreco(produto[campo])) return produto[campo] as number;
 
   return produto.precoVenda ?? 0;
 }
