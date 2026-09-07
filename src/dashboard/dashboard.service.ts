@@ -33,17 +33,44 @@ export class DashboardService {
    * atrasada, pedido esperando resposta, prateleira vazia.
    */
   async visaoGeral() {
-    const [produtos, estoque, receber, aPagar, pedidosNovos] = await Promise.all(
-      [
-        this.produtos.countDocuments({ ativo: true }),
-        this.contagemDeEstoque(),
-        this.pendencias(),
-        this.gastos.vencidos(),
-        this.pedidos.countDocuments({ status: 'novo' }),
-      ],
-    );
+    const hoje = hojeNaLoja();
+    const primeiroDoMes = dayjs(hoje).startOf('month').format('YYYY-MM-DD');
+
+    const [
+      produtos,
+      estoque,
+      receber,
+      aPagar,
+      pedidosNovos,
+      doMes,
+      deHoje,
+    ] = await Promise.all([
+      this.produtos.countDocuments({ ativo: true }),
+      this.contagemDeEstoque(),
+      this.pendencias(),
+      this.gastos.vencidos(),
+      this.pedidos.countDocuments({ status: 'novo' }),
+      this.totais(intervalo(primeiroDoMes, hoje)),
+      this.totais(intervalo(hoje, hoje)),
+    ]);
 
     return {
+      /*
+       * Vendas do mês e do dia.
+       *
+       * O mês responde "como estou indo"; o dia, "já vendi alguma coisa
+       * hoje?". São perguntas diferentes e as duas aparecem na abertura
+       * da loja — separá-las em telas distintas obrigaria a procurar.
+       */
+      mes: {
+        faturamento: doMes.faturamento,
+        lucro: doMes.lucro,
+        numVendas: doMes.numVendas,
+      },
+      hoje: {
+        faturamento: deHoje.faturamento,
+        numVendas: deHoje.numVendas,
+      },
       produtos,
       estoque,
       receber,
@@ -469,4 +496,20 @@ export class DashboardService {
       valorEstoque: dinheiro(valor[0]?.valorEstoque ?? 0),
     };
   }
+}
+
+/**
+ * O filtro de período das vendas concluídas.
+ *
+ * As bordas vêm do fuso da loja, não do relógio do servidor — uma venda
+ * das 21h30 pertence ao dia comercial em que foi feita, e no Render (que
+ * roda em UTC) ela já seria do dia seguinte. Ver common/fuso.ts.
+ */
+function intervalo(de: string, ate: string): PipelineStage.Match {
+  return {
+    $match: {
+      status: 'concluida',
+      data: { $gte: inicioDoDia(de), $lte: fimDoDia(ate) },
+    },
+  };
 }
