@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, Post, Query } from '@nestjs/common';
-import { MovimentarEstoqueDto } from './estoque.dto';
+import { FiltroPerdasDto, MovimentarEstoqueDto } from './estoque.dto';
 import { EstoqueService } from './estoque.service';
 
 @Controller('estoque')
@@ -14,6 +14,17 @@ export class EstoqueController {
   @Get('valor')
   valor() {
     return this.service.valorDoEstoque();
+  }
+
+  /**
+   * O que saiu sem virar venda, e quanto custou.
+   *
+   * Fica antes de ':produtoId/movimentacoes' por causa da ordem das
+   * rotas: declarada depois, "perdas" seria lido como um id de produto.
+   */
+  @Get('perdas')
+  perdas(@Query() filtro: FiltroPerdasDto) {
+    return this.service.perdas(filtro.de, filtro.ate);
   }
 
   @Get('movimentacoes')
@@ -40,6 +51,7 @@ export class EstoqueController {
       tipo: dto.tipo,
       quantidade: dto.quantidade,
       custoUnitario: dto.custoUnitario ?? null,
+      causa: dto.causa ?? null,
       motivo: dto.motivo ?? null,
       fornecedorId: dto.fornecedor ?? null,
     });

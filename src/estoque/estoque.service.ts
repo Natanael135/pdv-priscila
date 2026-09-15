@@ -5,6 +5,8 @@ import {
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { ClientSession, Model, Types } from 'mongoose';
+import { fimDoDia, hojeNaLoja, inicioDoDia } from '../common/fuso';
+import { dinheiro } from '../common/margem';
 import { custoDoItem } from '../common/precos';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
 import {
@@ -14,8 +16,11 @@ import {
   Variacao,
 } from '../produtos/produto.schema';
 import {
+  CAUSAS_DE_BAIXA,
+  CausaDeBaixa,
   Movimentacao,
   MovimentacaoDocument,
+  TIPOS_DE_BAIXA,
   TipoMovimentacao,
 } from './movimentacao.schema';
 
@@ -27,6 +32,8 @@ export interface EntradaMovimentacao {
   /** 'ajuste' -> contagem nova; demais -> quanto entrou/saiu */
   quantidade: number;
   custoUnitario?: number | null;
+  /** por que saiu sem venda; só vale em perda e saída */
+  causa?: CausaDeBaixa | null;
   motivo?: string | null;
   vendaId?: Types.ObjectId | null;
   /** fornecedor da remessa; só usado em entrada */
@@ -129,6 +136,15 @@ export class EstoqueService {
            */
           fornecedor:
             entrada.tipo === 'entrada' ? (entrada.fornecedorId ?? null) : null,
+          /*
+           * Causa só em baixa. Uma entrada com causa "furto" não
+           * significaria nada, e sujaria o relatório de prejuízo.
+           * Baixa sem causa vira "outro": registro antigo, ou app
+           * desatualizado, não pode sumir do total.
+           */
+          causa: TIPOS_DE_BAIXA.includes(entrada.tipo)
+            ? (entrada.causa ?? 'outro')
+            : null,
           motivo: entrada.motivo ?? null,
         },
       ],
@@ -147,9 +163,16 @@ export class EstoqueService {
    * para produto que nunca foi vendido. Sem isto, as movimentações
    * ficariam apontando para um produto inexistente e engordando a
    * coleção sem servir para nada.
+   *
+   * Perdas e saídas FICAM. Elas são dinheiro que a loja perdeu, e o
+   * relatório de prejuízo do mês não pode encolher porque alguém
+   * apagou o cadastro da peça que quebrou. Cada baixa já guarda o nome
+   * do produto e o custo, então continua legível sem ele.
    */
   async removerHistoricoDoProduto(produtoId: string) {
-    await this.movimentacoes.deleteMany({ produto: produtoId }).exec();
+    await this.movimentacoes
+      .deleteMany({ produto: produtoId, tipo: { $nin: TIPOS_DE_BAIXA } })
+      .exec();
   }
 
   historico(produtoId: string, limite = 50) {
@@ -167,6 +190,99 @@ export class EstoqueService {
       .sort({ criadoEm: -1 })
       .limit(limite)
       .exec();
+  }
+
+  /**
+   * Relatório de prejuízo: tudo que saiu sem virar venda no período.
+   *
+   * O prejuízo é pelo CUSTO, não pelo preço de venda. A peça que quebrou
+   * nunca ia render os R$ 100 da etiqueta com certeza — o que a loja
+   * perdeu de fato foi o que pagou por ela. Contar pelo preço de venda
+   * inflaria o número e assustaria à toa.
+   *
+   * O custo usado é o gravado na hora da baixa, e não o de hoje: se o
+   * fornecedor aumentou depois, a perda do mês passado não muda.
+   *
+   * Sem período, é o mês corrente até hoje — a pergunta natural é
+   * "quanto já perdi este mês?".
+   */
+  async perdas(de?: string, ate?: string) {
+    const hoje = hojeNaLoja();
+    const diaInicial = de ?? `${hoje.slice(0, 8)}01`;
+    const diaFinal = ate ?? hoje;
+
+    if (diaInicial > diaFinal) {
+      throw new BadRequestException('A data inicial é depois da final');
+    }
+
+    const registros = await this.movimentacoes
+      .find({
+        tipo: { $in: TIPOS_DE_BAIXA },
+        criadoEm: { $gte: inicioDoDia(diaInicial), $lte: fimDoDia(diaFinal) },
+      })
+      .sort({ criadoEm: -1 })
+      .lean()
+      .exec();
+
+    const itens = registros.map((m) => {
+      const custoUnitario = m.custoUnitario ?? 0;
+      return {
+        id: String(m._id),
+        produto: String(m.produto),
+        produtoNome: m.produtoNome,
+        variacaoDescricao: m.variacaoDescricao,
+        tipo: m.tipo as 'perda' | 'saida',
+        // registro de antes da causa existir entra como "outro", e não some
+        causa: (m.causa ?? 'outro') as CausaDeBaixa,
+        quantidade: m.quantidade,
+        custoUnitario,
+        prejuizo: dinheiro(m.quantidade * custoUnitario),
+        /** a baixa foi gravada sem custo — o prejuízo dela está subestimado */
+        semCusto: m.custoUnitario == null || m.custoUnitario === 0,
+        motivo: m.motivo,
+        criadoEm: (m as unknown as { criadoEm: Date }).criadoEm,
+      };
+    });
+
+    const somar = (lista: typeof itens) => ({
+      prejuizo: dinheiro(lista.reduce((s, i) => s + i.prejuizo, 0)),
+      pecas: lista.reduce((s, i) => s + i.quantidade, 0),
+      registros: lista.length,
+    });
+
+    // todas as causas vêm, até as zeradas: a tela mostra sempre as mesmas
+    // linhas, na mesma ordem, e dá para comparar um mês com o outro
+    const porCausa = CAUSAS_DE_BAIXA.map((causa) => ({
+      causa,
+      ...somar(itens.filter((i) => i.causa === causa)),
+    })).sort((a, b) => b.prejuizo - a.prejuizo);
+
+    const agrupado = new Map<string, typeof itens>();
+    for (const i of itens) {
+      const lista = agrupado.get(i.produto) ?? [];
+      lista.push(i);
+      agrupado.set(i.produto, lista);
+    }
+    const porProduto = [...agrupado.entries()]
+      .map(([produto, lista]) => ({
+        produto,
+        produtoNome: lista[0].produtoNome,
+        ...somar(lista),
+      }))
+      .sort((a, b) => b.prejuizo - a.prejuizo)
+      .slice(0, 5);
+
+    return {
+      de: diaInicial,
+      ate: diaFinal,
+      total: somar(itens),
+      perdas: somar(itens.filter((i) => i.tipo === 'perda')),
+      saidas: somar(itens.filter((i) => i.tipo === 'saida')),
+      porCausa,
+      porProduto,
+      semCusto: itens.filter((i) => i.semCusto).length,
+      itens,
+    };
   }
 
   /** No mínimo ou zerados: a lista de compras da loja. */
