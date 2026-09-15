@@ -33,7 +33,62 @@ export class ProdutosService {
     private readonly uploads: UploadsService,
   ) {}
 
+  /**
+   * A lista inteira, de uma vez.
+   *
+   * Continua existindo para quem precisa de tudo — o catálogo em PDF — e
+   * para o APK que ainda não foi atualizado, que espera uma lista pura.
+   * As telas de rolagem usam `listarPagina`.
+   */
   async listar(filtro: FiltroProdutos = {}) {
+    const produtos = await this.modelo
+      .find(this.filtroDaLista(filtro))
+      .collation(COLACAO)
+      .sort({ nome: 1, _id: 1 })
+      .populate('categoria', 'nome cor icone')
+      .populate('fornecedor', 'nome telefone contato prazoEntregaDias')
+      .exec();
+
+    return produtos.map((p) => comSituacao(p));
+  }
+
+  /**
+   * Uma página da lista de produtos.
+   *
+   * Com 2 mil produtos, mandar tudo eram ~2 MB e segundos de espera — e
+   * o celular ainda precisava montar cada card. Aqui vão só os que cabem
+   * na tela e mais um pouco; o resto vem quando a pessoa rola.
+   *
+   * O `_id` no desempate da ordem não é detalhe: dois produtos com o
+   * mesmo nome sem desempate podem trocar de lugar entre uma página e
+   * outra, e um deles aparece duas vezes enquanto o outro some.
+   */
+  async listarPagina(filtro: FiltroProdutos, pagina: number, limite: number) {
+    const query = this.filtroDaLista(filtro);
+    const { pular, tamanho } = paginacao(pagina, limite);
+
+    const [produtos, total] = await Promise.all([
+      this.modelo
+        .find(query)
+        .collation(COLACAO)
+        .sort({ nome: 1, _id: 1 })
+        .skip(pular)
+        .limit(tamanho)
+        .populate('categoria', 'nome cor icone')
+        .populate('fornecedor', 'nome telefone contato prazoEntregaDias')
+        .exec(),
+      this.modelo.countDocuments(query).exec(),
+    ]);
+
+    return montarPagina(
+      produtos.map((p) => comSituacao(p)),
+      total,
+      pagina,
+      tamanho,
+    );
+  }
+
+  private filtroDaLista(filtro: FiltroProdutos) {
     const query: QueryFilter<ProdutoDocument> = {};
 
     if (!filtro.incluirInativos) query.ativo = true;
@@ -68,14 +123,7 @@ export class ProdutosService {
       query.$expr = { $lte: ['$estoqueAtual', '$estoqueMinimo'] };
     }
 
-    const produtos = await this.modelo
-      .find(query)
-      .sort({ nome: 1 })
-      .populate('categoria', 'nome cor icone')
-      .populate('fornecedor', 'nome telefone contato prazoEntregaDias')
-      .exec();
-
-    return produtos.map((p) => comSituacao(p));
+    return query;
   }
 
   async obter(id: string) {
@@ -356,19 +404,133 @@ export class ProdutosService {
   }
 
   /**
-   * Tela de margens: junta o cadastro com o que o produto já rendeu.
-   * O quanto vendeu vem das vendas concluídas, item a item.
+   * Tela de margens, inteira: junta o cadastro com o que o produto já
+   * rendeu. Mantida para o APK antigo; as telas novas usam
+   * `margensPagina`.
    */
   async margens(ordem: OrdemMargem = 'margemPercentual') {
-    const desempenho = await this.vendas.aggregate<{
-      _id: string;
+    const [desempenho, produtos] = await Promise.all([
+      this.desempenho(),
+      this.modelo
+        .find({ ativo: true })
+        .populate('categoria', 'nome cor icone')
+        .populate('fornecedor', 'nome telefone contato prazoEntregaDias')
+        .exec(),
+    ]);
+
+    const linhas = produtos.map((p) => linhaDeMargem(p, desempenho));
+
+    linhas.sort((a, b) => {
+      if (ordem === 'nome') return a.nome.localeCompare(b.nome, 'pt-BR');
+      return Number(b[ordem] ?? 0) - Number(a[ordem] ?? 0);
+    });
+
+    return linhas;
+  }
+
+  /**
+   * Uma página da tela de margens.
+   *
+   * Duas estratégias, conforme a ordem pedida:
+   *
+   *  - nome e margem são campos do produto: o banco ordena e já entrega
+   *    só a página. As vendas são somadas apenas para os produtos dela.
+   *
+   *  - lucro gerado e quantidade vendida só existem somando as vendas.
+   *    Aí se soma tudo (uma linha curta por produto vendido), ordena-se
+   *    uma lista LEVE — só id e nome — e o cadastro completo é buscado
+   *    apenas para os produtos da página. O pesado, que é montar e
+   *    enviar o cadastro de 2 mil produtos, não acontece.
+   */
+  async margensPagina(
+    ordem: OrdemMargem,
+    busca: string | undefined,
+    pagina: number,
+    limite: number,
+  ) {
+    const query = this.filtroDaLista({ busca });
+    const { pular, tamanho } = paginacao(pagina, limite);
+
+    if (ordem === 'nome' || ordem === 'margemPercentual') {
+      const [produtos, total] = await Promise.all([
+        this.modelo
+          .find(query)
+          .collation(COLACAO)
+          .sort(
+            ordem === 'nome'
+              ? { nome: 1, _id: 1 }
+              : { margemPercentual: -1, nome: 1, _id: 1 },
+          )
+          .skip(pular)
+          .limit(tamanho)
+          .populate('categoria', 'nome cor icone')
+          .populate('fornecedor', 'nome telefone contato prazoEntregaDias')
+          .exec(),
+        this.modelo.countDocuments(query).exec(),
+      ]);
+
+      const desempenho = await this.desempenho(produtos.map((p) => p._id));
+      return montarPagina(
+        produtos.map((p) => linhaDeMargem(p, desempenho)),
+        total,
+        pagina,
+        tamanho,
+      );
+    }
+
+    const [desempenho, leves] = await Promise.all([
+      this.desempenho(),
+      this.modelo.find(query).select('nome').lean().exec(),
+    ]);
+
+    const ordenados = leves
+      .map((p) => {
+        const id = String(p._id);
+        return { id, nome: p.nome, valor: desempenho.get(id)?.[ordem] ?? 0 };
+      })
+      .sort(
+        (a, b) =>
+          b.valor - a.valor ||
+          a.nome.localeCompare(b.nome, 'pt-BR') ||
+          a.id.localeCompare(b.id),
+      );
+
+    const idsDaPagina = ordenados.slice(pular, pular + tamanho).map((p) => p.id);
+
+    const produtos = await this.modelo
+      .find({ _id: { $in: idsDaPagina } })
+      .populate('categoria', 'nome cor icone')
+      .populate('fornecedor', 'nome telefone contato prazoEntregaDias')
+      .exec();
+
+    // o $in não guarda ordem: a página é remontada na ordem calculada
+    const porId = new Map(produtos.map((p) => [String(p._id), p]));
+    const itens = idsDaPagina.flatMap((id) => {
+      const p = porId.get(id);
+      return p ? [linhaDeMargem(p, desempenho)] : [];
+    });
+
+    return montarPagina(itens, ordenados.length, pagina, tamanho);
+  }
+
+  /**
+   * Quanto cada produto já vendeu e rendeu, das vendas concluídas.
+   * Com `ids`, soma só esses — é o caso da página ordenada por nome.
+   */
+  private async desempenho(ids?: Types.ObjectId[]) {
+    const linhas = await this.vendas.aggregate<{
+      _id: Types.ObjectId;
       quantidadeVendida: number;
       faturamento: number;
       lucroGerado: number;
     }>([
       { $match: { status: 'concluida' } },
       { $unwind: '$itens' },
-      { $match: { 'itens.produto': { $ne: null } } },
+      {
+        $match: ids
+          ? { 'itens.produto': { $in: ids } }
+          : { 'itens.produto': { $ne: null } },
+      },
       {
         $group: {
           _id: '$itens.produto',
@@ -386,32 +548,7 @@ export class ProdutosService {
       },
     ]);
 
-    const porProduto = new Map(desempenho.map((d) => [String(d._id), d]));
-
-    const produtos = await this.modelo
-      .find({ ativo: true })
-      .populate('categoria', 'nome cor icone')
-      .populate('fornecedor', 'nome telefone contato prazoEntregaDias')
-      .exec();
-
-    const linhas = produtos.map((p) => {
-      const d = porProduto.get(String(p._id));
-      return {
-        ...comSituacao(p),
-        quantidadeVendida: arredondar(d?.quantidadeVendida ?? 0),
-        faturamento: arredondar(d?.faturamento ?? 0),
-        lucroGerado: arredondar(d?.lucroGerado ?? 0),
-      };
-    });
-
-    // ordenação em memória: a lista de produtos de uma loja cabe nisso,
-    // e evita duas idas ao banco só para ordenar por campo calculado
-    linhas.sort((a, b) => {
-      if (ordem === 'nome') return a.nome.localeCompare(b.nome, 'pt-BR');
-      return Number(b[ordem] ?? 0) - Number(a[ordem] ?? 0);
-    });
-
-    return linhas;
+    return new Map(linhas.map((d) => [String(d._id), d]));
   }
 
   private async garantirCodigoLivre(codigo?: string | null) {
@@ -445,6 +582,44 @@ function comSituacao(produto: ProdutoDocument) {
         : 'ok';
 
   return { ...json, situacaoEstoque };
+}
+
+/**
+ * Ordem alfabética de gente: "édredom" junto do "E", "toalha" junto do
+ * "Toalha". A ordem crua do banco põe maiúsculas antes e acento depois
+ * do Z — e a lista parece embaralhada.
+ */
+const COLACAO = { locale: 'pt', strength: 1 };
+
+/** página começa em 1; limite entre 1 e 100 para ninguém pedir tudo de novo */
+export function paginacao(pagina: number, limite: number) {
+  const p = Math.max(1, Math.floor(pagina) || 1);
+  const tamanho = Math.min(100, Math.max(1, Math.floor(limite) || 30));
+  return { pular: (p - 1) * tamanho, tamanho };
+}
+
+export function montarPagina<T>(itens: T[], total: number, pagina: number, tamanho: number) {
+  const p = Math.max(1, Math.floor(pagina) || 1);
+  return {
+    itens,
+    total,
+    pagina: p,
+    limite: tamanho,
+    temMais: p * tamanho < total,
+  };
+}
+
+function linhaDeMargem(
+  produto: ProdutoDocument,
+  desempenho: Map<string, { quantidadeVendida: number; faturamento: number; lucroGerado: number }>,
+) {
+  const d = desempenho.get(String(produto._id));
+  return {
+    ...comSituacao(produto),
+    quantidadeVendida: arredondar(d?.quantidadeVendida ?? 0),
+    faturamento: arredondar(d?.faturamento ?? 0),
+    lucroGerado: arredondar(d?.lucroGerado ?? 0),
+  };
 }
 
 function arredondar(n: number) {
