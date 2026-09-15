@@ -11,10 +11,11 @@ import {
 } from '@nestjs/common';
 import { AtualizarProdutoDto, CriarProdutoDto } from './produtos.dto';
 import { ProdutosService } from './produtos.service';
-import type { OrdemMargem } from './produtos.service';
+import type { DirecaoMargem, OrdemMargem } from './produtos.service';
 
 const ORDENS_DE_MARGEM: OrdemMargem[] = [
   'margemPercentual',
+  'lucroUnitario',
   'lucroGerado',
   'quantidadeVendida',
   'nome',
@@ -58,15 +59,25 @@ export class ProdutosController {
     @Query('busca') busca?: string,
     @Query('pagina') pagina?: string,
     @Query('limite') limite?: string,
+    @Query('direcao') direcao?: string,
   ) {
+    const direcaoValida: DirecaoMargem | undefined =
+      direcao === 'asc' || direcao === 'desc' ? direcao : undefined;
+
     const ordemValida = ORDENS_DE_MARGEM.includes(ordem as OrdemMargem)
       ? (ordem as OrdemMargem)
       : 'margemPercentual';
 
     if (pagina !== undefined) {
-      return this.service.margensPagina(ordemValida, busca, Number(pagina), Number(limite));
+      return this.service.margensPagina(
+        ordemValida,
+        busca,
+        Number(pagina),
+        Number(limite),
+        direcaoValida,
+      );
     }
-    return this.service.margens(ordemValida);
+    return this.service.margens(ordemValida, direcaoValida);
   }
 
   /** Usado pelo leitor de código de barras da câmera. */

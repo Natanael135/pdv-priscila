@@ -20,7 +20,20 @@ export interface FiltroProdutos {
 }
 
 export type OrdemMargem =
-  'margemPercentual' | 'lucroGerado' | 'quantidadeVendida' | 'nome';
+  | 'margemPercentual'
+  | 'lucroUnitario'
+  | 'lucroGerado'
+  | 'quantidadeVendida'
+  | 'nome';
+
+/**
+ * Para que lado ordenar. Sem direção, cada ordem usa a natural: número
+ * do maior para o menor ("maior margem"), nome de A a Z.
+ */
+export type DirecaoMargem = 'asc' | 'desc';
+
+const direcaoNatural = (ordem: OrdemMargem): DirecaoMargem =>
+  ordem === 'nome' ? 'asc' : 'desc';
 
 @Injectable()
 export class ProdutosService {
@@ -408,7 +421,8 @@ export class ProdutosService {
    * rendeu. Mantida para o APK antigo; as telas novas usam
    * `margensPagina`.
    */
-  async margens(ordem: OrdemMargem = 'margemPercentual') {
+  async margens(ordem: OrdemMargem = 'margemPercentual', direcao?: DirecaoMargem) {
+    const sinal = (direcao ?? direcaoNatural(ordem)) === 'asc' ? 1 : -1;
     const [desempenho, produtos] = await Promise.all([
       this.desempenho(),
       this.modelo
@@ -421,8 +435,8 @@ export class ProdutosService {
     const linhas = produtos.map((p) => linhaDeMargem(p, desempenho));
 
     linhas.sort((a, b) => {
-      if (ordem === 'nome') return a.nome.localeCompare(b.nome, 'pt-BR');
-      return Number(b[ordem] ?? 0) - Number(a[ordem] ?? 0);
+      if (ordem === 'nome') return sinal * a.nome.localeCompare(b.nome, 'pt-BR');
+      return sinal * (Number(a[ordem] ?? 0) - Number(b[ordem] ?? 0));
     });
 
     return linhas;
@@ -447,19 +461,24 @@ export class ProdutosService {
     busca: string | undefined,
     pagina: number,
     limite: number,
+    direcao?: DirecaoMargem,
   ) {
     const query = this.filtroDaLista({ busca });
     const { pular, tamanho } = paginacao(pagina, limite);
+    const sinal = (direcao ?? direcaoNatural(ordem)) === 'asc' ? 1 : -1;
 
-    if (ordem === 'nome' || ordem === 'margemPercentual') {
+    // campos gravados no próprio produto: o banco ordena e pagina
+    if (ordem === 'nome' || ordem === 'margemPercentual' || ordem === 'lucroUnitario') {
       const [produtos, total] = await Promise.all([
         this.modelo
           .find(query)
           .collation(COLACAO)
           .sort(
+            // nome e _id desempatam sempre do mesmo jeito: com a direção
+            // invertida, empate trocando de lugar duplicaria item entre páginas
             ordem === 'nome'
-              ? { nome: 1, _id: 1 }
-              : { margemPercentual: -1, nome: 1, _id: 1 },
+              ? { nome: sinal, _id: 1 }
+              : { [ordem]: sinal, nome: 1, _id: 1 },
           )
           .skip(pular)
           .limit(tamanho)
@@ -490,7 +509,7 @@ export class ProdutosService {
       })
       .sort(
         (a, b) =>
-          b.valor - a.valor ||
+          sinal * (a.valor - b.valor) ||
           a.nome.localeCompare(b.nome, 'pt-BR') ||
           a.id.localeCompare(b.id),
       );
