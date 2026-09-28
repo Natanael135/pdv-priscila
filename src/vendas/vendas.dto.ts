@@ -59,6 +59,15 @@ export class PagamentoVendaDto {
   @IsInt()
   @Min(1)
   parcelas?: number;
+
+  /**
+   * A parte do valor que é acréscimo do cartão ou do fiado, numa venda
+   * que mistura formas. Os itens vão no preço à vista.
+   */
+  @IsOptional()
+  @IsNumber()
+  @Min(0, { message: 'O acréscimo não pode ser negativo' })
+  acrescimo?: number;
 }
 
 /**

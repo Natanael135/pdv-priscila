@@ -36,10 +36,12 @@ function venda(
   desconto = 0,
 ): VendaAntes {
   const subtotal = itens.reduce((s, i) => s + i.total, 0);
+  // venda dividida: o acréscimo do cartão/fiado está dentro dos pagamentos
+  const acrescimo = pagamentos.reduce((s, p) => s + (p.acrescimo ?? 0), 0);
   return {
     itens,
     desconto,
-    total: Math.round((subtotal - desconto) * 100) / 100,
+    total: Math.round((subtotal - desconto + acrescimo) * 100) / 100,
     pagamentos,
     cobrancas,
   };
@@ -350,6 +352,135 @@ describe('planejarEdicao', () => {
         { forma: 'fiado', valor: 40, parcelas: 1 },
       ]);
       expect(plano.situacao).toBe('parcial');
+    });
+  });
+
+  describe('venda dividida com acréscimo do cartão ou do fiado', () => {
+    // 380 à vista, 400 no cartão: 300 em dinheiro e 84,21 no cartão
+    const blusaECalca = () =>
+      venda(
+        [linha('Blusa', 1, 180), linha('Calça', 1, 200)],
+        [
+          { forma: 'dinheiro', valor: 300, parcelas: 1, acrescimo: 0 },
+          { forma: 'credito', valor: 84.21, parcelas: 1, acrescimo: 4.21 },
+        ],
+      );
+
+    it('a peça que sai estorna o cartão inteiro, com o acréscimo dele', () => {
+      const plano = planejarEdicao(blusaECalca(), {
+        quantidades: [1, 0],
+        desconto: 0,
+      });
+
+      // a blusa fica pelo preço à vista, paga em dinheiro: sem taxa de cartão
+      expect(plano.total).toBe(180);
+      expect(plano.acrescimo).toBe(0);
+      expect(plano.pagamentos).toEqual([
+        { forma: 'dinheiro', valor: 180, parcelas: 1, acrescimo: 0 },
+      ]);
+      expect(plano.devolucoes).toEqual([
+        { forma: 'credito', valor: 84.21 },
+        { forma: 'dinheiro', valor: 120 },
+      ]);
+    });
+
+    it('desconto depois: o cartão devolve a parte dele e mantém a mesma taxa', () => {
+      const plano = planejarEdicao(blusaECalca(), {
+        quantidades: [1, 1],
+        desconto: 10,
+      });
+
+      // os 10 à vista que saem do cartão valiam 10,53 na maquininha
+      expect(plano.devolucoes).toEqual([{ forma: 'credito', valor: 10.53 }]);
+      expect(plano.pagamentos).toEqual([
+        { forma: 'dinheiro', valor: 300, parcelas: 1, acrescimo: 0 },
+        { forma: 'credito', valor: 73.68, parcelas: 1, acrescimo: 3.68 },
+      ]);
+      expect(plano.acrescimo).toBe(3.68);
+      expect(plano.total).toBe(373.68);
+    });
+
+    it('dinheiro lançado por último: a devolução sai dele e o cartão fica como estava', () => {
+      const antes = venda(
+        [linha('Blusa', 1, 180), linha('Calça', 1, 200)],
+        [
+          { forma: 'credito', valor: 100, parcelas: 1, acrescimo: 5 },
+          { forma: 'dinheiro', valor: 285, parcelas: 1, acrescimo: 0 },
+        ],
+      );
+
+      const plano = planejarEdicao(antes, { quantidades: [1, 0], desconto: 0 });
+
+      expect(plano.devolucoes).toEqual([{ forma: 'dinheiro', valor: 200 }]);
+      expect(plano.pagamentos).toEqual([
+        { forma: 'credito', valor: 100, parcelas: 1, acrescimo: 5 },
+        { forma: 'dinheiro', valor: 85, parcelas: 1, acrescimo: 0 },
+      ]);
+      expect(plano.acrescimo).toBe(5);
+      expect(plano.total).toBe(185);
+    });
+
+    it('fiado em aberto: a dívida some inteira, sem sobrar taxa do fiado', () => {
+      const antes = venda(
+        [linha('Toalha', 1, 100), linha('Lençol', 1, 100)],
+        [
+          { forma: 'dinheiro', valor: 100, parcelas: 1, acrescimo: 0 },
+          { forma: 'fiado', valor: 105, parcelas: 1, acrescimo: 5 },
+        ],
+        [parcela('p1', 1, 1, 105)],
+      );
+
+      const plano = planejarEdicao(antes, { quantidades: [0, 1], desconto: 0 });
+
+      expect(plano.abatidoDoFiado).toBe(105);
+      expect(plano.cobrancas).toEqual([
+        expect.objectContaining({ id: 'p1', remover: true }),
+      ]);
+      expect(plano.devolucoes).toEqual([]);
+      expect(plano.pagamentos).toEqual([
+        { forma: 'dinheiro', valor: 100, parcelas: 1, acrescimo: 0 },
+      ]);
+      expect(plano.total).toBe(100);
+      expect(plano.situacao).toBe('pago');
+    });
+
+    it('fiado já pago: devolve o que entrou, com a parte da taxa', () => {
+      const antes = venda(
+        [linha('Toalha', 1, 100), linha('Lençol', 1, 100)],
+        [
+          { forma: 'pix', valor: 50, parcelas: 1, acrescimo: 0 },
+          { forma: 'fiado', valor: 157.5, parcelas: 1, acrescimo: 7.5 },
+        ],
+        [parcela('p1', 1, 1, 157.5, { valorPago: 157.5, pago: true })],
+      );
+
+      const plano = planejarEdicao(antes, { quantidades: [0, 1], desconto: 0 });
+
+      // 50 à vista saem do Pix; os outros 50 saem do fiado, que valiam 52,50
+      expect(plano.devolucoes).toEqual([
+        { forma: 'pix', valor: 50 },
+        { forma: 'fiado', valor: 52.5 },
+      ]);
+      expect(plano.pagamentos).toEqual([
+        { forma: 'fiado', valor: 105, parcelas: 1, acrescimo: 5 },
+      ]);
+      expect(plano.total).toBe(105);
+    });
+
+    it('não deixa subir o total, contando o acréscimo', () => {
+      const antes = venda(
+        [linha('Blusa', 1, 180), linha('Calça', 1, 200)],
+        [
+          { forma: 'dinheiro', valor: 300, parcelas: 1, acrescimo: 0 },
+          { forma: 'credito', valor: 73.68, parcelas: 1, acrescimo: 3.68 },
+        ],
+        [],
+        10,
+      );
+
+      expect(() =>
+        planejarEdicao(antes, { quantidades: [1, 1], desconto: 0 }),
+      ).toThrow('só pode baixar');
     });
   });
 

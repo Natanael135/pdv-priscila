@@ -76,6 +76,18 @@ export class Pagamento {
 
   @Prop({ default: 1, min: 1 })
   parcelas: number;
+
+  /**
+   * A parte deste valor que é acréscimo do cartão ou do fiado, numa
+   * venda que mistura formas: dos 84,21 no cartão, 4,21 são a taxa sobre
+   * os 80 que faltavam à vista.
+   *
+   * Fica no pagamento, e não só na venda, porque é dele: se a peça volta
+   * e o cartão é estornado, o acréscimo sai junto com o estorno — e não
+   * sobra cobrando de quem pagou o resto em dinheiro.
+   */
+  @Prop({ default: 0, min: 0 })
+  acrescimo: number;
 }
 
 export const PagamentoSchema = SchemaFactory.createForClass(Pagamento);
@@ -138,6 +150,13 @@ export class EdicaoVenda {
 
   @Prop({ default: 0 })
   descontoNovo: number;
+
+  /** o acréscimo do cartão/fiado encolhe junto com as peças que saem */
+  @Prop({ default: 0 })
+  acrescimoAnterior: number;
+
+  @Prop({ default: 0 })
+  acrescimoNovo: number;
 
   @Prop({ type: [ItemDevolvidoSchema], default: [] })
   itensDevolvidos: ItemDevolvido[];
@@ -213,6 +232,19 @@ export class Venda {
   @Prop({ default: 0 })
   desconto: number;
 
+  /**
+   * O que a parte paga no cartão ou no fiado somou ao preço à vista,
+   * quando a venda mistura formas: 300 em dinheiro e o resto no cartão.
+   * É a soma do acréscimo de cada pagamento.
+   *
+   * Os itens ficam no preço à vista e esta é a linha que a cliente vê no
+   * comprovante. Cartão inteiro não usa isto — lá os itens já vão no
+   * preço de cartão, como sempre foi.
+   */
+  @Prop({ default: 0, min: 0 })
+  acrescimo: number;
+
+  /** subtotal − desconto + acréscimo */
   @Prop({ default: 0 })
   total: number;
 

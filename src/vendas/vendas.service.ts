@@ -16,7 +16,12 @@ import {
 import { Cliente, ClienteDocument } from '../clientes/cliente.schema';
 import { ContadorService } from '../common/contador.service';
 import { fimDoDia, hojeNaLoja, inicioDoDia } from '../common/fuso';
-import { custoDoItem, precoDaTabela } from '../common/precos';
+import {
+  custoDoItem,
+  precoDaTabela,
+  ROTULO_DA_TABELA,
+  tabelaDaForma,
+} from '../common/precos';
 import type { TabelaDePreco } from '../common/precos';
 import { dinheiro, moeda } from '../common/margem';
 import { Configuracao } from '../configuracoes/configuracao.schema';
@@ -247,7 +252,8 @@ export class VendasService {
       );
     }
 
-    const total = dinheiro(subtotal - desconto);
+    const acrescimo = conferirAcrescimo(dto, tabela);
+    const total = dinheiro(subtotal - desconto + acrescimo);
 
     // ── Pagamentos ─────────────────────────────────────────────────
     const somaPagamentos = dinheiro(
@@ -294,10 +300,12 @@ export class VendasService {
             forma: p.forma,
             valor: p.valor,
             parcelas: p.parcelas ?? 1,
+            acrescimo: dinheiro(p.acrescimo ?? 0),
           })),
           tabelaPreco: tabela,
           subtotal,
           desconto,
+          acrescimo,
           total,
           custoTotal,
           lucro: dinheiro(total - custoTotal),
@@ -607,6 +615,8 @@ export class VendasService {
           totalNovo: plano.total,
           descontoAnterior: venda.desconto,
           descontoNovo: plano.desconto,
+          acrescimoAnterior: venda.acrescimo ?? 0,
+          acrescimoNovo: plano.acrescimo,
           itensDevolvidos: plano.devolvidas.map((p) => ({
             produtoNome: p.produtoNome,
             variacaoDescricao: p.variacaoDescricao,
@@ -621,10 +631,14 @@ export class VendasService {
         venda.itens = plano.itens;
         venda.subtotal = plano.subtotal;
         venda.desconto = plano.desconto;
+        venda.acrescimo = plano.acrescimo;
         venda.total = plano.total;
         venda.custoTotal = plano.custoTotal;
         venda.lucro = dinheiro(plano.total - plano.custoTotal);
-        venda.pagamentos = plano.pagamentos;
+        venda.pagamentos = plano.pagamentos.map((p) => ({
+          ...p,
+          acrescimo: p.acrescimo ?? 0,
+        }));
         venda.situacao = plano.situacao;
         await venda.save({ session });
 
@@ -675,6 +689,59 @@ export class VendasService {
   }
 }
 
+/**
+ * O acréscimo que o app mandou em cada pagamento, conferido. Devolve a
+ * soma, que é o acréscimo da venda.
+ *
+ * Quem calcula é o app, na hora de cobrar (utils/precoProporcional.ts),
+ * porque só lá se sabe qual peça teve o preço mexido na mão — do mesmo
+ * jeito que o preço de cada item já vem de lá. Aqui só se barra o que
+ * não tem como estar certo: acréscimo em dinheiro ou Pix, do tamanho do
+ * pagamento inteiro, ou em cima de itens que não estão no à vista.
+ */
+function conferirAcrescimo(
+  dto: RegistrarVendaDto,
+  tabela: TabelaDePreco,
+): number {
+  let acrescimo = 0;
+
+  for (const p of dto.pagamentos) {
+    const doPagamento = dinheiro(p.acrescimo ?? 0);
+    if (doPagamento <= 0) continue;
+
+    if (tabelaDaForma(p.forma) === 'avista') {
+      throw new BadRequestException(
+        'Acréscimo só na parte paga no cartão ou no fiado — ' +
+          'dinheiro, Pix e transferência pagam o preço à vista.',
+      );
+    }
+
+    if (doPagamento >= p.valor) {
+      throw new BadRequestException(
+        `O acréscimo (${moeda(doPagamento)}) não pode ser o pagamento ` +
+          `inteiro (${moeda(p.valor)}).`,
+      );
+    }
+
+    acrescimo = dinheiro(acrescimo + doPagamento);
+  }
+
+  if (acrescimo > 0 && tabela === 'revenda') {
+    throw new BadRequestException(
+      'Revendedor paga o preço de revenda em qualquer forma de pagamento — ' +
+        'a venda não leva acréscimo.',
+    );
+  }
+
+  if (acrescimo > 0 && tabela !== 'avista') {
+    throw new BadRequestException(
+      'O acréscimo vai sobre o preço à vista. Com os itens no preço de ' +
+        `${ROTULO_DA_TABELA[tabela]}, a diferença seria cobrada duas vezes.`,
+    );
+  }
+
+  return acrescimo;
+}
 
 function escapar(texto: string) {
   return texto.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -715,6 +782,8 @@ function estadoDaVenda(
       forma: p.forma,
       valor: p.valor,
       parcelas: p.parcelas ?? 1,
+      // venda anterior ao acréscimo não tem o campo
+      acrescimo: p.acrescimo ?? 0,
     })),
     cobrancas: parcelas.map((p) => ({
       id: String(p._id),
@@ -737,6 +806,8 @@ function resumoDaEdicao(venda: VendaDocument, plano: PlanoDeEdicao) {
     subtotalNovo: plano.subtotal,
     descontoAnterior: venda.desconto,
     descontoNovo: plano.desconto,
+    acrescimoAnterior: venda.acrescimo ?? 0,
+    acrescimoNovo: plano.acrescimo,
     lucroNovo: dinheiro(plano.total - plano.custoTotal),
     devolvidas: plano.devolvidas.map((p) => ({
       produtoNome: p.produtoNome,

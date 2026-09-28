@@ -34,6 +34,11 @@ export interface PagamentoDaVenda {
   forma: FormaPagamento;
   valor: number;
   parcelas: number;
+  /**
+   * A parte do valor que é acréscimo do cartão ou do fiado, numa venda
+   * que mistura formas. Ausente ou zero nas outras.
+   */
+  acrescimo?: number;
 }
 
 /** Uma parcela a receber desta venda: fiado ou cartão parcelado. */
@@ -100,6 +105,8 @@ export interface PlanoDeEdicao {
   devolvidas: PecaDevolvida[];
   subtotal: number;
   desconto: number;
+  /** o acréscimo que sobra nos pagamentos que ficaram */
+  acrescimo: number;
   total: number;
   custoTotal: number;
   /** quanto a venda encolheu */
@@ -193,18 +200,27 @@ export function planejarEdicao(
     );
   }
 
-  const total = dinheiro(subtotal - desconto);
+  /*
+   * A conta anda no preço dos itens, sem o acréscimo do cartão: é nele
+   * que a peça e o desconto são medidos. O acréscimo é dos pagamentos, e
+   * cada um perde o seu junto com a parte que for estornada — ver
+   * `redistribuir`.
+   */
+  const valorDosItens = dinheiro(subtotal - desconto);
+  const acrescimoAntes = somar(venda.pagamentos.map((p) => p.acrescimo ?? 0));
+  const valorAntes = dinheiro(venda.total - acrescimoAntes);
 
-  if (total <= 0) {
+  if (valorDosItens <= 0) {
     throw new BadRequestException(
       'O total não pode ficar zerado. Para devolver tudo, cancele a venda.',
     );
   }
 
-  if (total > venda.total + FOLGA) {
+  if (valorDosItens > valorAntes + FOLGA) {
     throw new BadRequestException(
       `A alteração só pode baixar o valor da venda: ela era de ${moeda(venda.total)} ` +
-        `e ficaria ${moeda(total)}. Para cobrar a mais, faça uma venda nova.`,
+        `e ficaria ${moeda(dinheiro(valorDosItens + acrescimoAntes))}. ` +
+        'Para cobrar a mais, faça uma venda nova.',
     );
   }
 
@@ -212,17 +228,25 @@ export function planejarEdicao(
     throw new BadRequestException('Nada mudou na venda.');
   }
 
-  const reducao = Math.max(dinheiro(venda.total - total), 0);
+  const redistribuido = redistribuir(
+    venda.pagamentos,
+    venda.cobrancas,
+    Math.max(dinheiro(valorAntes - valorDosItens), 0),
+  );
+
+  const acrescimo = somar(redistribuido.pagamentos.map((p) => p.acrescimo ?? 0));
+  const total = dinheiro(valorDosItens + acrescimo);
 
   return {
     itens,
     devolvidas,
     subtotal,
     desconto,
+    acrescimo,
     total,
     custoTotal,
-    reducao,
-    ...redistribuir(venda.pagamentos, venda.cobrancas, reducao, total),
+    reducao: Math.max(dinheiro(venda.total - total), 0),
+    ...redistribuido,
   };
 }
 
@@ -262,6 +286,12 @@ type Cobranca = CobrancaDaVenda & { abatido: number };
  *      dinheiro já entrou e volta para o cliente;
  *   3. por último, do fiado que o cliente já pagou — também volta.
  *
+ * `reducao` é medida no preço dos itens, sem acréscimo. O pagamento que
+ * tinha acréscimo do cartão ou do fiado encolhe com a parte dele: se os
+ * 80 à vista que o cartão cobria saem da venda, voltam os 84,21 que
+ * passaram na maquininha — e a cliente que pagou o resto em dinheiro
+ * não fica com acréscimo de cartão nenhum.
+ *
  * Os pagamentos continuam somando o total da venda, que é o que o
  * painel usa para dizer quanto entrou em cada forma.
  */
@@ -269,7 +299,6 @@ function redistribuir(
   pagamentosAntes: PagamentoDaVenda[],
   cobrancasAntes: CobrancaDaVenda[],
   reducao: number,
-  totalNovo: number,
 ) {
   const pagamentos = pagamentosAntes.map((p) => ({ ...p }));
   const cobrancas: Cobranca[] = cobrancasAntes.map((c) => ({
@@ -286,22 +315,36 @@ function redistribuir(
     cobrancas.filter((c) => c.forma === 'fiado').map((c) => c.valorPago),
   );
 
+  /*
+   * Quanto cada real do fiado cobre do preço dos itens. Sem acréscimo é
+   * um para um; com ele, os 105 do fiado cobriam 100 da venda.
+   */
+  const razaoDoFiado = razao(doFiado);
+
   let falta = reducao;
 
   // ── 1. A dívida em aberto ──────────────────────────────────────
-  const abatidoDoFiado = abater(emAberto(cobrancas, 'fiado'), falta);
-  tirar(doFiado, abatidoDoFiado);
-  falta = dinheiro(falta - abatidoDoFiado);
+  const aberto = somar(
+    emAberto(cobrancas, 'fiado').map((c) => dinheiro(c.valor - c.valorPago)),
+  );
+  const saiDoFiado = Math.min(falta, dinheiro(aberto / razaoDoFiado));
+  const abatidoDoFiado = abater(
+    emAberto(cobrancas, 'fiado'),
+    Math.min(aberto, dinheiro(saiDoFiado * razaoDoFiado)),
+  );
+  tirar(doFiado, abatidoDoFiado, saiDoFiado);
+  falta = dinheiro(falta - saiDoFiado);
 
   // ── 2. Os outros pagamentos, do último para o primeiro ─────────
   for (const pagamento of [...dosOutros].reverse()) {
     if (falta <= 0) break;
 
-    const tira = Math.min(pagamento.valor, falta);
-    if (tira <= 0) continue;
+    const sai = Math.min(falta, precoDe(pagamento));
+    if (sai <= 0) continue;
 
-    pagamento.valor = dinheiro(pagamento.valor - tira);
-    falta = dinheiro(falta - tira);
+    const tira = emReais(pagamento, sai);
+    tirar([pagamento], tira, sai);
+    falta = dinheiro(falta - sai);
     acumular(devolucoes, pagamento.forma, tira);
 
     // cartão parcelado: o que a maquininha ainda vai repassar encolhe junto
@@ -312,7 +355,7 @@ function redistribuir(
   // ── 3. O fiado que o cliente já pagou ──────────────────────────
   if (falta > 0) {
     const antes = somar(doFiado.map((p) => p.valor));
-    tirar(doFiado, falta);
+    tirar(doFiado, Math.min(antes, dinheiro(falta * razaoDoFiado)), falta);
     const depois = somar(doFiado.map((p) => p.valor));
 
     /*
@@ -357,6 +400,7 @@ function redistribuir(
       .map((c) => c.valor - c.valorPago),
   );
   const fiadoNaVenda = somar(doFiado.map((p) => p.valor));
+  const totalNovo = somar(pagamentos.map((p) => p.valor));
 
   // mesma régua do registro da venda e do recebimento das parcelas
   const situacao: PlanoDeEdicao['situacao'] =
@@ -419,17 +463,56 @@ function abater(cobrancas: Cobranca[], quanto: number): number {
   return dinheiro(quanto - resta);
 }
 
-/** Tira `quanto` dos pagamentos, do último para o primeiro. */
-function tirar(pagamentos: PagamentoDaVenda[], quanto: number) {
-  let resta = quanto;
+/**
+ * Tira `reais` dos pagamentos, do último para o primeiro.
+ *
+ * `preco` é a parte disso que era preço dos itens; o resto era
+ * acréscimo, e sai do acréscimo de quem pagou. Assim o que sobra em cada
+ * pagamento continua dizendo quanto dele é preço e quanto é taxa.
+ */
+function tirar(pagamentos: PagamentoDaVenda[], reais: number, preco = reais) {
+  let restaReais = reais;
+  let restaPreco = preco;
 
   for (const p of [...pagamentos].reverse()) {
-    if (resta <= 0) break;
+    if (restaReais <= 0) break;
 
-    const tira = Math.min(p.valor, resta);
+    const tira = Math.min(p.valor, restaReais);
+    const doPreco =
+      tira >= restaReais ? restaPreco : dinheiro((restaPreco * tira) / restaReais);
+
+    if (p.acrescimo) {
+      const doAcrescimo = Math.min(p.acrescimo, Math.max(dinheiro(tira - doPreco), 0));
+      p.acrescimo = dinheiro(p.acrescimo - doAcrescimo);
+    }
+
     p.valor = dinheiro(p.valor - tira);
-    resta = dinheiro(resta - tira);
+    restaReais = dinheiro(restaReais - tira);
+    restaPreco = dinheiro(restaPreco - doPreco);
   }
+}
+
+/** A parte do pagamento que é preço dos itens: o valor sem o acréscimo. */
+function precoDe(p: PagamentoDaVenda): number {
+  return dinheiro(p.valor - (p.acrescimo ?? 0));
+}
+
+/**
+ * Quanto sai em dinheiro de um pagamento quando `preco` do valor dos
+ * itens sai dele: o preço mais a parte do acréscimo que vinha junto.
+ */
+function emReais(p: PagamentoDaVenda, preco: number): number {
+  const doPagamento = precoDe(p);
+  if (preco >= doPagamento - FOLGA) return p.valor;
+  if (!p.acrescimo) return preco;
+  return Math.min(p.valor, dinheiro((preco * p.valor) / doPagamento));
+}
+
+/** Quanto cada real destes pagamentos vale sobre o preço dos itens. */
+function razao(pagamentos: PagamentoDaVenda[]): number {
+  const valor = somar(pagamentos.map((p) => p.valor));
+  const preco = somar(pagamentos.map(precoDe));
+  return preco > 0 && valor > preco ? valor / preco : 1;
 }
 
 /**
