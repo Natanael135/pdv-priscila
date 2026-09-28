@@ -23,7 +23,7 @@ import {
   tabelaDaForma,
 } from '../common/precos';
 import type { TabelaDePreco } from '../common/precos';
-import { dinheiro, moeda } from '../common/margem';
+import { centavos, dinheiro, moeda } from '../common/margem';
 import { Configuracao } from '../configuracoes/configuracao.schema';
 import { EstoqueService } from '../estoque/estoque.service';
 import { Parcela } from '../parcelas/parcela.schema';
@@ -260,8 +260,9 @@ export class VendasService {
       dto.pagamentos.reduce((s, p) => s + p.valor, 0),
     );
 
-    // um centavo de folga para arredondamento de parcela
-    if (Math.abs(somaPagamentos - total) > 0.01) {
+    // um centavo de folga para arredondamento de parcela — contado em
+    // centavos inteiros, senão a folga falha no próprio centavo (margem.ts)
+    if (Math.abs(centavos(somaPagamentos) - centavos(total)) > 1) {
       throw new BadRequestException(
         `Os pagamentos somam ${moeda(somaPagamentos)}, mas a venda deu ` +
           `${moeda(total)}. Ajuste os valores.`,

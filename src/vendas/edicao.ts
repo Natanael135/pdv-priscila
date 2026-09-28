@@ -316,24 +316,40 @@ function redistribuir(
   );
 
   /*
-   * Quanto cada real do fiado cobre do preço dos itens. Sem acréscimo é
-   * um para um; com ele, os 105 do fiado cobriam 100 da venda.
+   * Cada pagamento é tratado sozinho, com a taxa DELE: dois fiados na
+   * mesma venda podem ter acréscimos diferentes (um cobrado à vista), e
+   * uma proporção média entre os dois errava o centavo — sobrava parcela
+   * de R$ 0,01 pendurada e o total deixava de fechar com os pagamentos.
    */
-  const razaoDoFiado = razao(doFiado);
-
   let falta = reducao;
 
   // ── 1. A dívida em aberto ──────────────────────────────────────
-  const aberto = somar(
+  let aberto = somar(
     emAberto(cobrancas, 'fiado').map((c) => dinheiro(c.valor - c.valorPago)),
   );
-  const saiDoFiado = Math.min(falta, dinheiro(aberto / razaoDoFiado));
-  const abatidoDoFiado = abater(
-    emAberto(cobrancas, 'fiado'),
-    Math.min(aberto, dinheiro(saiDoFiado * razaoDoFiado)),
-  );
-  tirar(doFiado, abatidoDoFiado, saiDoFiado);
-  falta = dinheiro(falta - saiDoFiado);
+  let abatidoDoFiado = 0;
+
+  for (const pagamento of [...doFiado].reverse()) {
+    if (falta <= 0 || aberto <= 0) break;
+
+    let sai = Math.min(falta, precoDe(pagamento));
+    let tira = emReais(pagamento, sai);
+
+    // a dívida não cobre tudo: sai só o que ainda se deve, com a parte
+    // de preço que cabe nesses reais
+    if (tira > aberto) {
+      tira = aberto;
+      sai = precoEm(pagamento, tira);
+    }
+    if (tira <= 0) continue;
+
+    encolher(pagamento, tira, sai);
+    falta = dinheiro(falta - sai);
+    aberto = dinheiro(aberto - tira);
+    abatidoDoFiado = dinheiro(abatidoDoFiado + tira);
+  }
+
+  abater(emAberto(cobrancas, 'fiado'), abatidoDoFiado);
 
   // ── 2. Os outros pagamentos, do último para o primeiro ─────────
   for (const pagamento of [...dosOutros].reverse()) {
@@ -343,7 +359,7 @@ function redistribuir(
     if (sai <= 0) continue;
 
     const tira = emReais(pagamento, sai);
-    tirar([pagamento], tira, sai);
+    encolher(pagamento, tira, sai);
     falta = dinheiro(falta - sai);
     acumular(devolucoes, pagamento.forma, tira);
 
@@ -355,7 +371,17 @@ function redistribuir(
   // ── 3. O fiado que o cliente já pagou ──────────────────────────
   if (falta > 0) {
     const antes = somar(doFiado.map((p) => p.valor));
-    tirar(doFiado, Math.min(antes, dinheiro(falta * razaoDoFiado)), falta);
+
+    for (const pagamento of [...doFiado].reverse()) {
+      if (falta <= 0) break;
+
+      const sai = Math.min(falta, precoDe(pagamento));
+      if (sai <= 0) continue;
+
+      encolher(pagamento, emReais(pagamento, sai), sai);
+      falta = dinheiro(falta - sai);
+    }
+
     const depois = somar(doFiado.map((p) => p.valor));
 
     /*
@@ -464,32 +490,16 @@ function abater(cobrancas: Cobranca[], quanto: number): number {
 }
 
 /**
- * Tira `reais` dos pagamentos, do último para o primeiro.
- *
- * `preco` é a parte disso que era preço dos itens; o resto era
- * acréscimo, e sai do acréscimo de quem pagou. Assim o que sobra em cada
- * pagamento continua dizendo quanto dele é preço e quanto é taxa.
+ * Tira `reais` de um pagamento, dos quais `preco` eram preço dos itens;
+ * o resto era acréscimo, e sai do acréscimo dele. Assim o que sobra no
+ * pagamento continua dizendo quanto é preço e quanto é taxa.
  */
-function tirar(pagamentos: PagamentoDaVenda[], reais: number, preco = reais) {
-  let restaReais = reais;
-  let restaPreco = preco;
-
-  for (const p of [...pagamentos].reverse()) {
-    if (restaReais <= 0) break;
-
-    const tira = Math.min(p.valor, restaReais);
-    const doPreco =
-      tira >= restaReais ? restaPreco : dinheiro((restaPreco * tira) / restaReais);
-
-    if (p.acrescimo) {
-      const doAcrescimo = Math.min(p.acrescimo, Math.max(dinheiro(tira - doPreco), 0));
-      p.acrescimo = dinheiro(p.acrescimo - doAcrescimo);
-    }
-
-    p.valor = dinheiro(p.valor - tira);
-    restaReais = dinheiro(restaReais - tira);
-    restaPreco = dinheiro(restaPreco - doPreco);
+function encolher(p: PagamentoDaVenda, reais: number, preco: number) {
+  if (p.acrescimo) {
+    const doAcrescimo = Math.min(p.acrescimo, Math.max(dinheiro(reais - preco), 0));
+    p.acrescimo = dinheiro(p.acrescimo - doAcrescimo);
   }
+  p.valor = dinheiro(p.valor - reais);
 }
 
 /** A parte do pagamento que é preço dos itens: o valor sem o acréscimo. */
@@ -508,11 +518,11 @@ function emReais(p: PagamentoDaVenda, preco: number): number {
   return Math.min(p.valor, dinheiro((preco * p.valor) / doPagamento));
 }
 
-/** Quanto cada real destes pagamentos vale sobre o preço dos itens. */
-function razao(pagamentos: PagamentoDaVenda[]): number {
-  const valor = somar(pagamentos.map((p) => p.valor));
-  const preco = somar(pagamentos.map(precoDe));
-  return preco > 0 && valor > preco ? valor / preco : 1;
+/** O caminho inverso: quanto de `reais` saídos do pagamento era preço. */
+function precoEm(p: PagamentoDaVenda, reais: number): number {
+  if (reais >= p.valor - FOLGA) return precoDe(p);
+  if (!p.acrescimo) return reais;
+  return dinheiro(reais - Math.min(p.acrescimo, dinheiro((reais * p.acrescimo) / p.valor)));
 }
 
 /**

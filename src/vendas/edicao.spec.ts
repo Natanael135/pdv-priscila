@@ -467,6 +467,54 @@ describe('planejarEdicao', () => {
       expect(plano.total).toBe(105);
     });
 
+    it('dois fiados com taxas diferentes e parcelas pagas em parte: fecha no centavo', () => {
+      // 1.147,80 à vista: débito e dois fiados em 3x, cada um com o seu
+      // acréscimo, e parte das parcelas já recebida
+      const antes = venda(
+        [
+          linha('Jogo de cama', 2, 281.88),
+          linha('Edredom', 1, 246.38),
+          linha('Toalha', 2, 65.21),
+          linha('Lençol', 2, 103.62),
+        ],
+        [
+          { forma: 'debito', valor: 42.34, parcelas: 1, acrescimo: 4.24 },
+          { forma: 'fiado', valor: 553.03, parcelas: 3, acrescimo: 82.05 },
+          { forma: 'fiado', valor: 750, parcelas: 3, acrescimo: 111.28 },
+        ],
+        [
+          parcela('a1', 1, 3, 184.34),
+          parcela('a2', 2, 3, 184.34, { valorPago: 113.34 }),
+          parcela('a3', 3, 3, 184.35),
+          parcela('b1', 1, 3, 250),
+          parcela('b2', 2, 3, 250, { valorPago: 216.39 }),
+          parcela('b3', 3, 3, 250, { valorPago: 250, pago: true }),
+        ],
+      );
+
+      // fica só um lençol
+      const plano = planejarEdicao(antes, {
+        quantidades: [0, 0, 0, 1],
+        desconto: 0,
+      });
+
+      // a dívida em aberto sai inteira: com uma taxa média para os dois
+      // fiados, sobrava uma parcela de R$ 0,01 pendurada
+      expect(plano.abatidoDoFiado).toBe(723.3);
+      expect(plano.cobrancas).toHaveLength(5);
+      expect(plano.cobrancas.every((c) => c.remover || c.quitada)).toBe(true);
+
+      // os pagamentos somam o total, e o dinheiro fecha com o que saiu
+      expect(plano.pagamentos).toEqual([
+        { forma: 'fiado', valor: 121.67, parcelas: 3, acrescimo: 18.05 },
+      ]);
+      expect(plano.total).toBe(121.67);
+      expect(plano.devolucoes).toEqual([
+        { forma: 'debito', valor: 42.34 },
+        { forma: 'fiado', valor: 458.06 },
+      ]);
+    });
+
     it('não deixa subir o total, contando o acréscimo', () => {
       const antes = venda(
         [linha('Blusa', 1, 180), linha('Calça', 1, 200)],

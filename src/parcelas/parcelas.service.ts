@@ -7,7 +7,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import dayjs from 'dayjs';
 import { Model, QueryFilter, Types } from 'mongoose';
 import { fimDoDia, hojeNaLoja, inicioDoDia } from '../common/fuso';
-import { dinheiro, moeda } from '../common/margem';
+import { centavos, dinheiro, moeda } from '../common/margem';
 import { NotificacoesService } from '../notificacoes/notificacoes.service';
 import { Venda } from '../vendas/venda.schema';
 import { Parcela, ParcelaDocument } from './parcela.schema';
@@ -63,7 +63,10 @@ export class ParcelasService {
     if (recebido <= 0) {
       throw new BadRequestException('O valor recebido precisa ser maior que zero');
     }
-    if (recebido > saldo + 0.01) {
+    // as duas folgas de um centavo contam em centavos inteiros: em reais,
+    // 36,67 − 0,01 dava 36,660000000000004, e a parcela paga com 36,66
+    // continuava em aberto (ver `centavos` em margem.ts)
+    if (centavos(recebido) > centavos(saldo) + 1) {
       throw new BadRequestException(
         `O valor é maior que o saldo desta parcela (${moeda(saldo)})`,
       );
@@ -71,7 +74,7 @@ export class ParcelasService {
 
     parcela.valorPago = dinheiro(parcela.valorPago + recebido);
     // um centavo de folga: parcela arredondada nunca fecha exato
-    parcela.pago = parcela.valorPago >= parcela.valor - 0.01;
+    parcela.pago = centavos(parcela.valorPago) >= centavos(parcela.valor) - 1;
     parcela.pagoEm = parcela.pago ? new Date() : null;
 
     // registra a entrada: valorPago guarda o total, não quando cada

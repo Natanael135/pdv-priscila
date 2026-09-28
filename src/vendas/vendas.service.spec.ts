@@ -314,11 +314,15 @@ describe('VendasService — alterar venda', () => {
 });
 
 /**
- * O registro da venda dividida: itens no preço à vista e o acréscimo do
- * cartão/fiado de cada pagamento somado ao total. O app faz a conta; a
- * API confere o que não tem como estar certo.
+ * O registro da venda: a conta que o app precisa repetir centavo por
+ * centavo para o pagamento fechar.
+ *
+ * Na venda dividida, os itens vão no preço à vista e o acréscimo do
+ * cartão/fiado de cada pagamento soma no total — o app faz a conta, a
+ * API confere o que não tem como estar certo. Com quantidade quebrada,
+ * cada linha arredonda no centavo antes da soma.
  */
-describe('VendasService — registrar venda com acréscimo', () => {
+describe('VendasService — registrar venda', () => {
   const blusa = new Types.ObjectId();
   const calca = new Types.ObjectId();
 
@@ -468,6 +472,48 @@ describe('VendasService — registrar venda com acréscimo', () => {
         ],
       }),
     ).rejects.toThrow('Revendedor');
+  });
+
+  it('quantidade quebrada: cada linha é arredondada no centavo antes de somar', async () => {
+    const { service, gravado } = montarRegistro();
+
+    // 1,58 m a 231,75 dá 366,165: a linha grava 366,17, e é por esta conta
+    // que o carrinho do app fecha o pagamento (utils/precos.ts)
+    await service.registrar({
+      itens: [
+        { produto: String(blusa), quantidade: 3, precoUnitario: 305.19 },
+        { produto: String(calca), quantidade: 2, precoUnitario: 340.16 },
+        { produto: String(blusa), quantidade: 1.58, precoUnitario: 231.75 },
+        { produto: String(calca), quantidade: 2, precoUnitario: 43.28 },
+      ],
+      pagamentos: [{ forma: 'dinheiro', valor: 2048.62 }],
+    });
+
+    expect(gravado().itens[2]).toMatchObject({ total: 366.17 });
+    expect(gravado()).toMatchObject({ subtotal: 2048.62, total: 2048.62 });
+  });
+
+  it('um centavo de diferença passa, como a folga promete', async () => {
+    const { service, gravado } = montarRegistro();
+
+    // em reais, 2.058,44 − 2.058,43 dá 0.010000000000218, "mais" que 0,01
+    await service.registrar({
+      itens: [{ produto: String(blusa), quantidade: 1, precoUnitario: 2058.44 }],
+      pagamentos: [{ forma: 'dinheiro', valor: 2058.43 }],
+    });
+
+    expect(gravado()).toMatchObject({ total: 2058.44 });
+  });
+
+  it('dois centavos de diferença continuam recusados', async () => {
+    const { service } = montarRegistro();
+
+    await expect(
+      service.registrar({
+        itens: [{ produto: String(blusa), quantidade: 1, precoUnitario: 2058.44 }],
+        pagamentos: [{ forma: 'dinheiro', valor: 2058.42 }],
+      }),
+    ).rejects.toThrow('Os pagamentos somam');
   });
 
   it('acréscimo do tamanho do pagamento inteiro é recusado', async () => {

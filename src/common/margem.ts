@@ -81,3 +81,16 @@ export function moeda(n: number): string {
 export function dinheiro(n: number): number {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
+
+/**
+ * O valor em centavos inteiros — para COMPARAR dinheiro com folga.
+ *
+ * Em reais, a folga de um centavo falhava justo no centavo: 2.058,43
+ * menos 2.058,44 dá 0.010000000000218 no computador, que é "maior que
+ * 0,01", e a venda era recusada; 36,67 − 0,01 dá 36,660000000000004, e
+ * a parcela paga com 36,66 ficava em aberto. Em centavos a diferença é
+ * 1, sem sobra nenhuma.
+ */
+export function centavos(n: number): number {
+  return Math.round((Number(n) || 0) * 100);
+}
