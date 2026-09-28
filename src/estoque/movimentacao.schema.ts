@@ -9,6 +9,7 @@ export const TIPOS_MOVIMENTACAO = [
   'saida', // saiu sem ser venda
   'venda',
   'cancelamento', // venda cancelada, produto voltou
+  'devolucao', // peça tirada de uma venda já feita, voltou para a prateleira
   'ajuste', // inventário: a contagem virou o novo saldo
   'perda', // quebra, vencimento, furto
 ] as const;

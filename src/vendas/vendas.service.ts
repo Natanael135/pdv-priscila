@@ -5,7 +5,14 @@ import {
 } from '@nestjs/common';
 import { InjectConnection, InjectModel } from '@nestjs/mongoose';
 import dayjs from 'dayjs';
-import { ClientSession, Connection, Model, QueryFilter, Types } from 'mongoose';
+import {
+  ClientSession,
+  Connection,
+  HydratedDocument,
+  Model,
+  QueryFilter,
+  Types,
+} from 'mongoose';
 import { Cliente, ClienteDocument } from '../clientes/cliente.schema';
 import { ContadorService } from '../common/contador.service';
 import { fimDoDia, hojeNaLoja, inicioDoDia } from '../common/fuso';
@@ -15,10 +22,13 @@ import { dinheiro, moeda } from '../common/margem';
 import { Configuracao } from '../configuracoes/configuracao.schema';
 import { EstoqueService } from '../estoque/estoque.service';
 import { Parcela } from '../parcelas/parcela.schema';
+import { ParcelasService } from '../parcelas/parcelas.service';
 import { Produto, Variacao } from '../produtos/produto.schema';
+import { planejarEdicao } from './edicao';
+import type { PlanoDeEdicao, VendaAntes } from './edicao';
 import { Venda, VendaDocument, VendaItem } from './venda.schema';
 import type { OrigemVenda } from './venda.schema';
-import { RegistrarVendaDto } from './vendas.dto';
+import { EditarVendaDto, RegistrarVendaDto } from './vendas.dto';
 
 export interface FiltroVendas {
   inicio?: string;
@@ -56,6 +66,7 @@ export class VendasService {
     private readonly configuracoes: Model<Configuracao>,
     private readonly estoque: EstoqueService,
     private readonly contador: ContadorService,
+    private readonly contasAReceber: ParcelasService,
   ) {}
 
   /**
@@ -486,6 +497,163 @@ export class VendasService {
     }
   }
 
+  // ─── Alteração depois de fechada ─────────────────────────────────
+
+  /**
+   * O que a alteração faria, sem gravar nada.
+   *
+   * A tela precisa dizer ANTES de confirmar quanto volta para o cliente
+   * e quanto sai do fiado. A conta é a mesma da alteração de verdade
+   * (planejarEdicao) — refazê-la no app seria ter duas regras para o
+   * dinheiro, e um dia elas discordariam na frente da cliente.
+   */
+  async previaDaEdicao(id: string, dto: EditarVendaDto) {
+    const venda = await this.vendaEditavel(id);
+    const parcelas = await this.parcelas.find({ venda: venda._id }).exec();
+
+    return resumoDaEdicao(
+      venda,
+      planejarEdicao(estadoDaVenda(venda, parcelas), dto),
+    );
+  }
+
+  /**
+   * Tira peças e/ou muda o desconto de uma venda já fechada.
+   *
+   * Numa transação só, como o registro e o cancelamento: a peça volta ao
+   * estoque, as parcelas encolhem e a venda é corrigida juntas. Pela
+   * metade, sobraria estoque devolvido de uma venda que continua
+   * cobrando a peça.
+   */
+  async editar(id: string, dto: EditarVendaDto) {
+    const session = await this.conexao.startSession();
+    // `as`, e não anotação: o valor chega de dentro da transação, e o
+    // TS travaria a variável em null se ela nascesse "null e pronto"
+    let cliente = null as Types.ObjectId | null;
+
+    try {
+      await session.withTransaction(async () => {
+        const venda = await this.vendaEditavel(id, session);
+        const parcelas = await this.parcelas
+          .find({ venda: venda._id })
+          .session(session)
+          .exec();
+
+        const plano = planejarEdicao(estadoDaVenda(venda, parcelas), dto);
+        const motivo = dto.motivo?.trim() || null;
+
+        // ── O que saiu volta para a prateleira ─────────────────────
+        for (const peca of plano.devolvidas) {
+          if (!peca.produto) continue;
+          await this.estoque.movimentar(
+            {
+              produtoId: peca.produto,
+              variacaoId: peca.variacao,
+              tipo: 'devolucao',
+              quantidade: peca.quantidade,
+              custoUnitario: peca.custoUnitario,
+              motivo:
+                `Devolvido da venda #${venda.numero}` +
+                (motivo ? ` — ${motivo}` : ''),
+              vendaId: venda._id,
+            },
+            session,
+          );
+        }
+
+        // ── Parcelas: encolhem, quitam ou somem ────────────────────
+        const porId = new Map(parcelas.map((p) => [String(p._id), p]));
+
+        for (const ajuste of plano.cobrancas) {
+          const parcela = porId.get(ajuste.id);
+          if (!parcela) continue;
+
+          if (ajuste.remover) {
+            await parcela.deleteOne({ session });
+            continue;
+          }
+
+          parcela.valor = ajuste.valor;
+          parcela.numero = ajuste.numero;
+          parcela.totalParcelas = ajuste.totalParcelas;
+
+          if (ajuste.abatido > 0) {
+            parcela.historico.push({
+              tipo: 'abatimento',
+              em: new Date(),
+              vencimentoAnterior: null,
+              vencimentoNovo: null,
+              valor: ajuste.abatido,
+              saldoDepois: dinheiro(ajuste.valor - parcela.valorPago),
+              observacao:
+                `Venda #${venda.numero} alterada` +
+                (motivo ? `: ${motivo}` : ''),
+            });
+          }
+
+          if (ajuste.quitada) {
+            parcela.pago = true;
+            // quitou no dia em que pagou a última parte, não no da alteração
+            parcela.pagoEm = ultimoRecebimento(parcela) ?? new Date();
+          }
+
+          await parcela.save({ session });
+        }
+
+        // ── A venda passa a dizer o que ficou ──────────────────────
+        venda.edicoes.push({
+          em: new Date(),
+          totalAnterior: venda.total,
+          totalNovo: plano.total,
+          descontoAnterior: venda.desconto,
+          descontoNovo: plano.desconto,
+          itensDevolvidos: plano.devolvidas.map((p) => ({
+            produtoNome: p.produtoNome,
+            variacaoDescricao: p.variacaoDescricao,
+            quantidade: p.quantidade,
+            valor: p.valor,
+          })),
+          abatidoDoFiado: plano.abatidoDoFiado,
+          devolucoes: plano.devolucoes,
+          motivo,
+        });
+
+        venda.itens = plano.itens;
+        venda.subtotal = plano.subtotal;
+        venda.desconto = plano.desconto;
+        venda.total = plano.total;
+        venda.custoTotal = plano.custoTotal;
+        venda.lucro = dinheiro(plano.total - plano.custoTotal);
+        venda.pagamentos = plano.pagamentos;
+        venda.situacao = plano.situacao;
+        await venda.save({ session });
+
+        cliente = venda.cliente;
+      });
+
+      // a parcela vencida pode ter sumido ou quitado — o aviso vai junto
+      if (cliente) await this.contasAReceber.revisarAvisoDeFiado(cliente);
+
+      return this.obter(id);
+    } finally {
+      await session.endSession();
+    }
+  }
+
+  private async vendaEditavel(id: string, session?: ClientSession) {
+    const venda = await this.modelo
+      .findById(id)
+      .session(session ?? null)
+      .exec();
+
+    if (!venda) throw new NotFoundException('Venda não encontrada');
+    if (venda.status === 'cancelada') {
+      throw new BadRequestException('Venda cancelada não pode ser alterada.');
+    }
+
+    return venda;
+  }
+
   /**
    * Exclusão definitiva — só de venda já cancelada. Apagar venda
    * concluída faria o faturamento do mês mudar sem deixar rastro; o
@@ -522,4 +690,73 @@ function formatarQtd(n: number): string {
 /** "44 · Preto" — mesmo rótulo usado no estoque e na tela. */
 function descreverVariacao(v: Variacao): string {
   return [v.tamanho, v.cor].filter(Boolean).join(' · ') || 'Padrão';
+}
+
+/** A venda e as parcelas como a conta da alteração enxerga: só números. */
+function estadoDaVenda(
+  venda: VendaDocument,
+  parcelas: HydratedDocument<Parcela>[],
+): VendaAntes {
+  return {
+    itens: venda.itens.map((i) => ({
+      produto: i.produto,
+      produtoNome: i.produtoNome,
+      variacao: i.variacao ?? null,
+      variacaoDescricao: i.variacaoDescricao ?? null,
+      quantidade: i.quantidade,
+      precoUnitario: i.precoUnitario,
+      custoUnitario: i.custoUnitario ?? 0,
+      desconto: i.desconto ?? 0,
+      total: i.total,
+    })),
+    desconto: venda.desconto ?? 0,
+    total: venda.total,
+    pagamentos: venda.pagamentos.map((p) => ({
+      forma: p.forma,
+      valor: p.valor,
+      parcelas: p.parcelas ?? 1,
+    })),
+    cobrancas: parcelas.map((p) => ({
+      id: String(p._id),
+      forma: p.forma,
+      numero: p.numero,
+      totalParcelas: p.totalParcelas,
+      vencimento: p.vencimento,
+      valor: p.valor,
+      valorPago: p.valorPago ?? 0,
+      pago: p.pago,
+    })),
+  };
+}
+
+/** O que a tela mostra antes de a pessoa confirmar a alteração. */
+function resumoDaEdicao(venda: VendaDocument, plano: PlanoDeEdicao) {
+  return {
+    totalAnterior: venda.total,
+    totalNovo: plano.total,
+    subtotalNovo: plano.subtotal,
+    descontoAnterior: venda.desconto,
+    descontoNovo: plano.desconto,
+    lucroNovo: dinheiro(plano.total - plano.custoTotal),
+    devolvidas: plano.devolvidas.map((p) => ({
+      produtoNome: p.produtoNome,
+      variacaoDescricao: p.variacaoDescricao,
+      quantidade: p.quantidade,
+      valor: p.valor,
+    })),
+    abatidoDoFiado: plano.abatidoDoFiado,
+    fiadoEmAberto: plano.fiadoEmAberto,
+    devolucoes: plano.devolucoes,
+    pagamentos: plano.pagamentos,
+  };
+}
+
+/** Quando entrou o último dinheiro desta parcela, se entrou algum. */
+function ultimoRecebimento(parcela: {
+  historico?: { tipo: string; em: Date }[];
+}): Date | null {
+  const recebimentos = (parcela.historico ?? []).filter(
+    (e) => e.tipo === 'recebimento',
+  );
+  return recebimentos.length ? recebimentos[recebimentos.length - 1].em : null;
 }

@@ -80,6 +80,82 @@ export class Pagamento {
 
 export const PagamentoSchema = SchemaFactory.createForClass(Pagamento);
 
+/** Peça que saiu de uma venda já fechada e voltou para o estoque. */
+@Schema({ _id: false })
+export class ItemDevolvido {
+  @Prop({ required: true })
+  produtoNome: string;
+
+  @Prop({ type: String, default: null })
+  variacaoDescricao: string | null;
+
+  @Prop({ required: true, min: 0 })
+  quantidade: number;
+
+  /** quanto aquelas peças valiam na venda, já com o desconto da linha */
+  @Prop({ required: true, min: 0 })
+  valor: number;
+}
+
+export const ItemDevolvidoSchema = SchemaFactory.createForClass(ItemDevolvido);
+
+/** Dinheiro que já tinha entrado e voltou para o cliente numa alteração. */
+@Schema({ _id: false })
+export class DevolucaoDeValor {
+  @Prop({ type: String, required: true, enum: FORMAS_PAGAMENTO })
+  forma: FormaPagamento;
+
+  @Prop({ required: true, min: 0 })
+  valor: number;
+}
+
+export const DevolucaoDeValorSchema =
+  SchemaFactory.createForClass(DevolucaoDeValor);
+
+/**
+ * Uma alteração feita depois de a venda fechar: peça devolvida ou
+ * desconto dado depois.
+ *
+ * A venda é corrigida no lugar — itens, totais e pagamentos passam a
+ * dizer o que de fato ficou, que é o que o faturamento e o comprovante
+ * precisam. Este registro guarda o antes e o porquê: sem ele, a venda
+ * editada seria indistinguível da original, e a pergunta "essa venda
+ * não era de 200?" ficaria sem resposta.
+ */
+@Schema({ _id: false })
+export class EdicaoVenda {
+  @Prop({ default: () => new Date() })
+  em: Date;
+
+  @Prop({ required: true })
+  totalAnterior: number;
+
+  @Prop({ required: true })
+  totalNovo: number;
+
+  @Prop({ default: 0 })
+  descontoAnterior: number;
+
+  @Prop({ default: 0 })
+  descontoNovo: number;
+
+  @Prop({ type: [ItemDevolvidoSchema], default: [] })
+  itensDevolvidos: ItemDevolvido[];
+
+  /** quanto saiu da dívida do fiado — não precisou voltar dinheiro */
+  @Prop({ default: 0 })
+  abatidoDoFiado: number;
+
+  /** o que já tinha sido pago e voltou para o cliente, por forma */
+  @Prop({ type: [DevolucaoDeValorSchema], default: [] })
+  devolucoes: DevolucaoDeValor[];
+
+  @Prop({ type: String, default: null })
+  motivo: string | null;
+}
+
+export const EdicaoVendaSchema = SchemaFactory.createForClass(EdicaoVenda);
+
 export const ORIGENS_VENDA = ['balcao', 'catalogo'] as const;
 export type OrigemVenda = (typeof ORIGENS_VENDA)[number];
 
@@ -163,6 +239,10 @@ export class Venda {
 
   @Prop({ type: String, default: null })
   motivoCancelamento: string | null;
+
+  /** alterações depois de fechada, da mais antiga para a mais nova */
+  @Prop({ type: [EdicaoVendaSchema], default: [] })
+  edicoes: EdicaoVenda[];
 }
 
 export const VendaSchema = SchemaFactory.createForClass(Venda);

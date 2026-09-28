@@ -101,7 +101,9 @@ export class EstoqueService {
     const delta =
       entrada.tipo === 'ajuste'
         ? Number(entrada.quantidade) - anterior
-        : entrada.tipo === 'entrada' || entrada.tipo === 'cancelamento'
+        : entrada.tipo === 'entrada' ||
+            entrada.tipo === 'cancelamento' ||
+            entrada.tipo === 'devolucao'
           ? quantidade
           : -quantidade;
 

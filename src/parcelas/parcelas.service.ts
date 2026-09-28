@@ -373,8 +373,13 @@ export class ParcelasService {
     }
   }
 
-  /** Sem nada vencido, o aviso de cobrança some sozinho. */
-  private async revisarAvisoDeFiado(clienteId: Types.ObjectId) {
+  /**
+   * Sem nada vencido, o aviso de cobrança some sozinho.
+   *
+   * Público porque a edição de venda também mexe em parcela: peça
+   * devolvida pode apagar justo a cobrança que estava atrasada.
+   */
+  async revisarAvisoDeFiado(clienteId: Types.ObjectId) {
     const aindaVencidas = await this.modelo
       .countDocuments({
         cliente: clienteId,

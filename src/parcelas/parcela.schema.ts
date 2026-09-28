@@ -6,7 +6,18 @@ import type { FormaPagamento } from '../vendas/venda.schema';
 
 export type ParcelaDocument = HydratedDocument<Parcela>;
 
-export const TIPOS_EVENTO = ['criada', 'adiada', 'recebimento'] as const;
+/**
+ * 'abatimento' é a venda que encolheu depois de fechada — peça
+ * devolvida ou desconto dado depois. A dívida diminui sem o cliente ter
+ * pago nada, e isso precisa ficar dito: sem o registro, o saldo menor
+ * pareceria um recebimento que nunca aconteceu.
+ */
+export const TIPOS_EVENTO = [
+  'criada',
+  'adiada',
+  'recebimento',
+  'abatimento',
+] as const;
 export type TipoEventoParcela = (typeof TIPOS_EVENTO)[number];
 
 /**
@@ -36,11 +47,11 @@ export class EventoParcela {
   @Prop({ type: Date, default: null })
   vencimentoNovo: Date | null;
 
-  /** recebimento: quanto entrou nesta vez */
+  /** recebimento: quanto entrou nesta vez | abatimento: quanto saiu da dívida */
   @Prop({ type: Number, default: null })
   valor: number | null;
 
-  /** recebimento: quanto ainda faltava depois dele */
+  /** recebimento e abatimento: quanto ainda faltava depois dele */
   @Prop({ type: Number, default: null })
   saldoDepois: number | null;
 

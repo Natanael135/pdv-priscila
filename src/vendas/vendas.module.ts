@@ -12,6 +12,7 @@ import {
 } from '../configuracoes/configuracao.schema';
 import { EstoqueModule } from '../estoque/estoque.module';
 import { Parcela, ParcelaSchema } from '../parcelas/parcela.schema';
+import { ParcelasModule } from '../parcelas/parcelas.module';
 import { Produto, ProdutoSchema } from '../produtos/produto.schema';
 import { Venda, VendaSchema } from './venda.schema';
 import { VendasController } from './vendas.controller';
@@ -28,6 +29,8 @@ import { VendasService } from './vendas.service';
       { name: CONTADOR, schema: ContadorSchema },
     ]),
     EstoqueModule,
+    // a alteração de venda mexe em parcela e precisa rever o aviso de fiado
+    ParcelasModule,
   ],
   controllers: [VendasController],
   providers: [VendasService, ContadorService],

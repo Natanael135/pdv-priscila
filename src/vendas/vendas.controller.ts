@@ -9,7 +9,11 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
-import { CancelarVendaDto, RegistrarVendaDto } from './vendas.dto';
+import {
+  CancelarVendaDto,
+  EditarVendaDto,
+  RegistrarVendaDto,
+} from './vendas.dto';
 import { VendasService } from './vendas.service';
 import type { OrigemVenda } from './venda.schema';
 
@@ -54,6 +58,19 @@ export class VendasController {
   @Patch(':id/cancelar')
   cancelar(@Param('id') id: string, @Body() dto: CancelarVendaDto) {
     return this.service.cancelar(id, dto.motivo);
+  }
+
+  /** O que a alteração faria — a tela mostra antes de confirmar. Não grava. */
+  @Post(':id/editar/previa')
+  @HttpCode(200)
+  previaDaEdicao(@Param('id') id: string, @Body() dto: EditarVendaDto) {
+    return this.service.previaDaEdicao(id, dto);
+  }
+
+  /** Tira peças (que voltam ao estoque) e/ou muda o desconto. */
+  @Patch(':id/editar')
+  editar(@Param('id') id: string, @Body() dto: EditarVendaDto) {
+    return this.service.editar(id, dto);
   }
 
   @Delete(':id')

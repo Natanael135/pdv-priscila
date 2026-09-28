@@ -11,6 +11,7 @@ import {
   IsOptional,
   IsPositive,
   IsString,
+  MaxLength,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -107,5 +108,33 @@ export class RegistrarVendaDto {
 export class CancelarVendaDto {
   @IsOptional()
   @IsString()
+  motivo?: string;
+}
+
+/**
+ * Alteração de uma venda já fechada: tirar peças e/ou mudar o desconto.
+ *
+ * Vão os valores FINAIS — quanto fica de cada linha, qual o desconto —
+ * e não "tire uma toalha". Assim, o mesmo pedido enviado duas vezes
+ * (toque duplo, rede que reenviou) não devolve a peça duas vezes: na
+ * segunda, ou nada mudou, ou a lista não bate mais com a venda.
+ */
+export class EditarVendaDto {
+  /** quanto FICA de cada linha, na ordem dos itens da venda; zero tira */
+  @IsArray()
+  @ArrayMinSize(1, { message: 'Informe as quantidades dos itens' })
+  @IsNumber({}, { each: true, message: 'Quantidade inválida' })
+  @Min(0, { each: true, message: 'A quantidade não pode ser negativa' })
+  quantidades: number[];
+
+  /** o novo desconto no total da venda, em R$ */
+  @IsNumber({}, { message: 'Informe o desconto' })
+  @Min(0, { message: 'O desconto não pode ser negativo' })
+  desconto: number;
+
+  /** "cliente devolveu a toalha", "cobrei à vista no cartão" */
+  @IsOptional()
+  @IsString()
+  @MaxLength(140)
   motivo?: string;
 }
