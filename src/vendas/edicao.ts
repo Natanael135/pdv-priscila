@@ -234,7 +234,9 @@ export function planejarEdicao(
     Math.max(dinheiro(valorAntes - valorDosItens), 0),
   );
 
-  const acrescimo = somar(redistribuido.pagamentos.map((p) => p.acrescimo ?? 0));
+  const acrescimo = somar(
+    redistribuido.pagamentos.map((p) => p.acrescimo ?? 0),
+  );
   const total = dinheiro(valorDosItens + acrescimo);
 
   return {
@@ -496,7 +498,10 @@ function abater(cobrancas: Cobranca[], quanto: number): number {
  */
 function encolher(p: PagamentoDaVenda, reais: number, preco: number) {
   if (p.acrescimo) {
-    const doAcrescimo = Math.min(p.acrescimo, Math.max(dinheiro(reais - preco), 0));
+    const doAcrescimo = Math.min(
+      p.acrescimo,
+      Math.max(dinheiro(reais - preco), 0),
+    );
     p.acrescimo = dinheiro(p.acrescimo - doAcrescimo);
   }
   p.valor = dinheiro(p.valor - reais);
@@ -522,7 +527,9 @@ function emReais(p: PagamentoDaVenda, preco: number): number {
 function precoEm(p: PagamentoDaVenda, reais: number): number {
   if (reais >= p.valor - FOLGA) return precoDe(p);
   if (!p.acrescimo) return reais;
-  return dinheiro(reais - Math.min(p.acrescimo, dinheiro((reais * p.acrescimo) / p.valor)));
+  return dinheiro(
+    reais - Math.min(p.acrescimo, dinheiro((reais * p.acrescimo) / p.valor)),
+  );
 }
 
 /**

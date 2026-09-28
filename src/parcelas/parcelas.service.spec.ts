@@ -32,7 +32,9 @@ function montar(parcela: ReturnType<typeof parcelaFalsa>) {
       // ainda há outra parcela em aberto: a venda não muda de situação
       countDocuments: () => ({ exec: () => Promise.resolve(1) }),
     } as never,
-    { findByIdAndUpdate: () => ({ exec: () => Promise.resolve(null) }) } as never,
+    {
+      findByIdAndUpdate: () => ({ exec: () => Promise.resolve(null) }),
+    } as never,
     { limparAvisoDeFiado: jest.fn() } as never,
   );
 }

@@ -489,8 +489,12 @@ describe('VendasService — registrar venda', () => {
       pagamentos: [{ forma: 'dinheiro', valor: 2048.62 }],
     });
 
-    expect(gravado().itens[2]).toMatchObject({ total: 366.17 });
-    expect(gravado()).toMatchObject({ subtotal: 2048.62, total: 2048.62 });
+    expect(gravado()).toMatchObject({
+      // a linha quebrada grava 366,17
+      itens: [{}, {}, { total: 366.17 }, {}],
+      subtotal: 2048.62,
+      total: 2048.62,
+    });
   });
 
   it('um centavo de diferença passa, como a folga promete', async () => {
@@ -498,7 +502,9 @@ describe('VendasService — registrar venda', () => {
 
     // em reais, 2.058,44 − 2.058,43 dá 0.010000000000218, "mais" que 0,01
     await service.registrar({
-      itens: [{ produto: String(blusa), quantidade: 1, precoUnitario: 2058.44 }],
+      itens: [
+        { produto: String(blusa), quantidade: 1, precoUnitario: 2058.44 },
+      ],
       pagamentos: [{ forma: 'dinheiro', valor: 2058.43 }],
     });
 
@@ -510,7 +516,9 @@ describe('VendasService — registrar venda', () => {
 
     await expect(
       service.registrar({
-        itens: [{ produto: String(blusa), quantidade: 1, precoUnitario: 2058.44 }],
+        itens: [
+          { produto: String(blusa), quantidade: 1, precoUnitario: 2058.44 },
+        ],
         pagamentos: [{ forma: 'dinheiro', valor: 2058.42 }],
       }),
     ).rejects.toThrow('Os pagamentos somam');
